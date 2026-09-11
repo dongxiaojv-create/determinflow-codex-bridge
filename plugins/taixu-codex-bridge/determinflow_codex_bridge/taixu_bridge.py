@@ -9,7 +9,7 @@ from . import bridge_native as native
 from .bridge_contract import validate_chat,chat_sse
 
 OWNER='taixu-codex-bridge'; PROVIDER='taixu_codex_limited'
-PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.0'
+PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.1'
 
 def build_request(params,provider):
     return {'client_kwargs':{},'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}
@@ -108,7 +108,8 @@ class Bridge:
             models[node_id]=explicit or selected
             if models[node_id].startswith(PROVIDER+':'):
                 overlay=dict(params.get(node_id) or {})
-                overlay.setdefault('reasoning_effort',(main.model_params or {}).get('reasoning_effort') or 'high')
+                agent_effort=(agent.model_params or {}).get('reasoning_effort') if agent else None
+                overlay.setdefault('reasoning_effort',agent_effort or (main.model_params or {}).get('reasoning_effort') or 'high')
                 params[node_id]=overlay
         return dict(body,node_model_overrides=models,node_model_params_overrides=params)
 

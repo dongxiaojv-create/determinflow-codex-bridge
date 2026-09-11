@@ -1,8 +1,10 @@
-# 0.3.0 发布验证
+# 0.3.1 发布验证
 
 日期：2026-09-11。此版本为 macOS Apple Silicon 预览版。
 
 ## 已验证
+
+- 0.3.1：`tests/check_selection.py` 经真实任务 HTTP 中间件验证 agent `low/medium` 保留、任务显式强度优先、Main/`high` 回退、模型与其他参数保留及输入不变。该回归检查在修复前失败；本次重跑包检查与 Core 启动检查。下列 Runtime 协议检查沿用 0.3.0 结果。
 
 - 独立新仓库，仅包含插件代码、声明、页面、文档和合成测试；未导入实验仓库 Git 历史。
 - 官方 `rust-v0.153.4` 发布的 npm arm64 包：可执行文件及 code-mode-host 的 SHA256 固定在插件 `app-pins.json`，不是作者桌面内置版的校验值。
