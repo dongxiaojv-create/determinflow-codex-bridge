@@ -297,7 +297,7 @@ async def run_chat(state,normalized,operation):
         expected=state.get('expected_runtime') or overrides(state['lab'],{},manual_fourth=True)
         check_config(effective,expected)
         if (await asyncio.to_thread(rpc.call,'remoteControl/status/read',None))['status']!='disabled':raise ValueError('Runtime remote control is not disabled')
-        account=await asyncio.to_thread(rpc.call,'account/read','account/rateLimits/read',{'refreshToken':False})
+        account=await asyncio.to_thread(rpc.call,'account/read',{'refreshToken':False})
         if expected['model_providers'][PROVIDER]['requires_openai_auth'] and ((account.get('account') or {}).get('type')!='chatgpt' or account.get('requiresOpenaiAuth') is not True):raise ValueError('Native ChatGPT authentication is unavailable')
         await admission()
         reply=await asyncio.to_thread(rpc.call,'thread/start',dict(model=normalized['model'],modelProvider=PROVIDER,allowProviderModelFallback=False,

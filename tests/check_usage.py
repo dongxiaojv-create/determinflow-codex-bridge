@@ -1,9 +1,16 @@
 """Offline usage regression: missing != zero, legacy fallback, no double counting."""
-import json,sys,tempfile
+import ast,inspect,json,sys,tempfile
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'plugins/taixu-codex-bridge'))
 from determinflow_codex_bridge.usage import local_usage,account_limits
 from determinflow_codex_bridge.bridge_native import DIRECTORY_METHODS
+from determinflow_codex_bridge import bridge_native
+# Every to_thread RPC call must match the real bound RPC signature.
+for node in ast.walk(ast.parse(inspect.getsource(bridge_native))):
+    if isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute) and node.func.attr=="to_thread" and node.args:
+        fn=node.args[0]
+        if isinstance(fn,ast.Attribute) and isinstance(fn.value,ast.Name) and fn.value.id=="rpc" and fn.attr=="call":
+            inspect.signature(bridge_native.RPC.call).bind(None,*[None for _ in node.args[1:]])
 assert "account/rateLimits/read" in DIRECTORY_METHODS
 assert "turn/start" not in DIRECTORY_METHODS and "account/rateLimitResetCredit/consume" not in DIRECTORY_METHODS
 with tempfile.TemporaryDirectory() as folder:
