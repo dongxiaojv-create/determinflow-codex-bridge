@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Codex 登录状态</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 20px;color:#e9eef7;background:#101725}button{font:inherit;padding:8px 16px;margin:8px 8px 8px 0;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#1c2738;padding:16px}a{color:#9dc1ff}</style>
+<h1>Codex Bridge</h1>
+<p>先在终端运行 <code>codex login</code>，通过官方浏览器页面登录自己的账户。此插件不接收密码，也不上传登录凭据。</p>
+<p>插件复用当前系统用户的 Codex CLI 登录，模型调用会消耗该账户额度。更换账户请在终端运行 <code>codex logout</code> 后重新登录。</p>
+<p>找不到 CLI 时，在插件设置填写 <code>codex_path</code>；需要代理时填写 <code>proxy</code>，保存后重启 DeterminFlow。</p>
+<button id="account">检查登录状态</button><button id="models">刷新模型目录</button>
+<pre id="result" role="status" aria-live="polite">尚未检查账户。检查和刷新目录不发送模型生成请求。</pre>
+<p>刷新目录后重启 DeterminFlow，再在模型菜单选择 Codex Bridge。未登录时请先完成官方登录。</p>
+<script>
+const result=document.getElementById('result');
+async function check(action){
+ const buttons=document.querySelectorAll('button');buttons.forEach(b=>b.disabled=true);result.textContent='检查中…';
+ try{
+  const response=await fetch('/api/taixu-codex-bridge/control/'+action,{method:'POST',headers:{'X-Taixu-Bridge-Control':'1'}});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||data.detail||'检查失败');
+  const account=data.account||{};
+  result.textContent=account.type==='chatgpt'?'已登录：'+(account.email||'ChatGPT 账户')+'。将使用此账户的额度。':'未检测到 ChatGPT 登录，请运行 codex login。';
+  if(data.models)result.textContent+='\n目录已刷新，请重启 DeterminFlow。';
+ }catch(error){result.textContent=error.message;}finally{buttons.forEach(b=>b.disabled=false);}
+}
+document.getElementById('account').onclick=()=>check('account');document.getElementById('models').onclick=()=>check('refresh-models');
+</script></html>

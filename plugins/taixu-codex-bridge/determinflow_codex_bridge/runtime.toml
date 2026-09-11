@@ -1,0 +1,58 @@
+model = "gpt-5.4"
+model_provider = "fixture"
+approval_policy = "never"
+sandbox_mode = "read-only"
+cli_auth_credentials_store = "file"
+check_for_update_on_startup = false
+web_search = "disabled"
+project_doc_max_bytes = 0
+include_environment_context = false
+include_permissions_instructions = false
+include_apps_instructions = false
+include_collaboration_mode_instructions = false
+[model_providers.fixture]
+name = "Phase 0 local fixture, NOT OpenAI"
+base_url = "http://127.0.0.1:57550/v1"
+wire_api = "responses"
+requires_openai_auth = false
+request_max_retries = 0
+stream_max_retries = 0
+# Long reasoning may produce no SSE events for more than the Runtime's default five minutes.
+stream_idle_timeout_ms = 1200000
+[orchestrator.skills]
+enabled = false
+[orchestrator.mcp]
+enabled = false
+[skills]
+include_instructions = false
+[skills.bundled]
+enabled = false
+[tools.update_plan]
+enabled = false
+[tools.experimental_request_user_input]
+enabled = false
+[features]
+shell_tool = false
+view_image = false
+apps = false
+plugins = false
+multi_agent = false
+multi_agent_v2 = false
+goals = false
+memories = false
+memory_tool = false
+hooks = false
+plugin_hooks = false
+shell_snapshot = false
+remote_models = false
+responses_websockets = false
+responses_websockets_v2 = false
+tool_search = false
+tool_suggest = false
+token_budget = false
+current_time_reminder = false
+image_generation = false
+browser_use = false
+computer_use = false
+code_mode = false
+js_repl = false

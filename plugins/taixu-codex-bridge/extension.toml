@@ -1,0 +1,16 @@
+[extension]
+id = "taixu-codex-bridge"
+name = "Codex Bridge"
+version = "0.3.0"
+api_version = "1"
+backend = "determinflow_codex_bridge.taixu_bridge:create_extension"
+capabilities = ["model.providers", "api.routes"]
+description = "Use your own local Codex CLI login in DeterminFlow. macOS Apple Silicon preview."
+
+[settings]
+schema = "settings.schema.json"
+
+[page]
+label = "Codex 登录状态"
+static_dir = "ui"
+entrypoint = "index.html"

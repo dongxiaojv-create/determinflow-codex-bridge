@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
+.codex/
+auth.json
+*.key
+*.pem
+*.crt
+install.json
+evidence/
+outputs/
+*.log
+*.ndjson
+.DS_Store

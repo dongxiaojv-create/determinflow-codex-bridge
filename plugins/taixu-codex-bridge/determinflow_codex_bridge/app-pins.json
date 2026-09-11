@@ -1,0 +1,8 @@
+{
+  "core": "9db9d98cf7ad29ec2c96e51c334547f5ad3e02b3",
+  "app_version": "1.1.0",
+  "runtime_version": "0.153.4",
+  "runtime_source": "https://github.com/openai/codex/releases/tag/rust-v0.153.4",
+  "runtime_sha256": "b973d440acac501fd2594a43e7ca9ce41e0a65b9dfb28d0d7a7837c99e1261e3",
+  "runtime_code_mode_host_sha256": "d8a2222e017342718d16a5dbe092921c628961f812f62f42036b8d960e1ffe56"
+}

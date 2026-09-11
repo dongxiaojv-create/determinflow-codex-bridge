@@ -1,0 +1,6 @@
+schema_version = "1"
+name = "DeterminFlow Codex Bridge"
+
+[[plugins]]
+id = "taixu-codex-bridge"
+subdirectory = "plugins/taixu-codex-bridge"
