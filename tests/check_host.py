@@ -33,8 +33,9 @@ async def check(temp):
             response=await client.get(url,headers={'Authorization':'Bearer '+bridge.key})
             assert response.status_code==200 and response.json()['data']
         # account/read against isolated, logged-out HOME; no model generation.
-        result=await bridge.management_rpc(False)
+        result=await bridge.management_rpc(False,usage=True)
         assert result['account']['type'] is None and result['turns_sent']==0
+        assert result['limits'] is None and result['limits_error']
         assert not list((data/'attempts').glob('*.json'))
     finally:await bridge.stop()
     print('PASS: real Core preflight, register/start, HTTPS provider, auth boundary, logged-out Runtime and stop; zero model requests')

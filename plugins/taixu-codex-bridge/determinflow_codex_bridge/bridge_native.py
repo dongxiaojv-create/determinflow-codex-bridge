@@ -3,7 +3,7 @@ import asyncio,copy,hashlib,ipaddress,json,os,queue,re,subprocess,tempfile,threa
 from pathlib import Path
 PROVIDER='taixu_phase0_signed_in'
 MODEL='gpt-5.5'
-DIRECTORY_METHODS=frozenset(('initialize','initialized','config/read','remoteControl/status/read','account/read','model/list'))
+DIRECTORY_METHODS=frozenset(('initialize','initialized','config/read','remoteControl/status/read','account/read','account/rateLimits/read','model/list'))
 DIAGNOSTIC_LOG=('off,codex_otel.trace_safe=info,reqwest::connect=debug,hyper_util::client::legacy::connect::http=trace,hyper_util::client::legacy::client=trace')
 def write(path,value):
     durable(path,value)
@@ -297,7 +297,7 @@ async def run_chat(state,normalized,operation):
         expected=state.get('expected_runtime') or overrides(state['lab'],{},manual_fourth=True)
         check_config(effective,expected)
         if (await asyncio.to_thread(rpc.call,'remoteControl/status/read',None))['status']!='disabled':raise ValueError('Runtime remote control is not disabled')
-        account=await asyncio.to_thread(rpc.call,'account/read',{'refreshToken':False})
+        account=await asyncio.to_thread(rpc.call,'account/read','account/rateLimits/read',{'refreshToken':False})
         if expected['model_providers'][PROVIDER]['requires_openai_auth'] and ((account.get('account') or {}).get('type')!='chatgpt' or account.get('requiresOpenaiAuth') is not True):raise ValueError('Native ChatGPT authentication is unavailable')
         await admission()
         reply=await asyncio.to_thread(rpc.call,'thread/start',dict(model=normalized['model'],modelProvider=PROVIDER,allowProviderModelFallback=False,
@@ -363,7 +363,7 @@ async def run_chat(state,normalized,operation):
             if calls and not interrupted and failure is None:failure=RuntimeError('Tool handoff cancellation was not confirmed; Runtime closed, remote state unknown')
         result=dict(operation=operation,thread_id=tid,turn_id=uid,terminal=terminal,interrupted=interrupted,state=('UNKNOWN' if terminal is None else 'FAILED') if failure else 'TOOL_HANDOFF' if calls else 'COMPLETED',usage=usage,error_type=type(failure).__name__ if failure else None,validation_feedback_count=validation_feedback_count)
         state['runtime_result']=result
-        if callable(state.get('save')):state['save'](**result)
+        if callable(state.get('save')):state['save'](**result,runtime_usage=usage)
         durable(state['out']/'runtime-result.json',result)
     if failure is not None:raise failure
     await admission()

@@ -83,6 +83,12 @@ def main():
             app=FastAPI();app.include_router(routers[0])
             with TestClient(app) as client:
                 assert client.post('/api/taixu-codex-bridge/control/account').status_code==403
+                assert client.post('/api/taixu-codex-bridge/control/local-usage').status_code==403
+                bridge.active={'synthetic':{}}
+                res=client.post('/api/taixu-codex-bridge/control/local-usage',headers={'X-Taixu-Bridge-Control':'1'})
+                assert res.status_code==200 and res.json()['totals']['requests']==0
+                assert client.post('/api/taixu-codex-bridge/control/usage',headers={'X-Taixu-Bridge-Control':'1'}).status_code==409
+                bridge.active={}
                 bridge.config['codex_path']=str(data/'missing')
                 res=client.post('/api/taixu-codex-bridge/control/account',headers={'X-Taixu-Bridge-Control':'1'})
                 assert res.status_code==400 and 'Codex CLI' in res.json()['error']

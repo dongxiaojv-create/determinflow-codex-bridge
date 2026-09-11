@@ -9,7 +9,7 @@ from . import bridge_native as native
 from .bridge_contract import validate_chat,chat_sse
 
 OWNER='taixu-codex-bridge'; PROVIDER='taixu_codex_limited'
-PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.1'
+PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.2'
 
 def build_request(params,provider):
     return {'client_kwargs':{},'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}
@@ -215,7 +215,7 @@ class Bridge:
         out=self.data/'outputs'/operation; out.mkdir(mode=0o700)
         return dict(lab=self.data,out=out,runtime_command=command,runtime_env=environment,expected_runtime=expected,note=self.note)
 
-    async def management_rpc(self,refresh):
+    async def management_rpc(self,refresh,usage=False):
         state=self.launch('management-'+uuid.uuid4().hex); rpc=None
         try:
             rpc=native.RPC(state['runtime_command'],state['runtime_env'],state['lab']/'work',self.note,directory_diagnostic=True)
@@ -226,6 +226,12 @@ class Bridge:
             account=await asyncio.to_thread(rpc.call,'account/read',{'refreshToken':False})
             info=account.get('account') or {}
             public=dict(type=info.get('type'),email=info.get('email'),requiresOpenaiAuth=account.get('requiresOpenaiAuth'),source='native account/read; no login performed')
+            limits=None;limits_error=None
+            if usage and info.get('type')=='chatgpt':
+                from .usage import account_limits
+                try:limits=account_limits(await asyncio.to_thread(rpc.call,'account/rateLimits/read',None))
+                except Exception:limits_error='账户额度暂时不可用，请稍后刷新。'
+            elif usage:limits_error='请先登录 ChatGPT 账户；API Key 余额不在此显示。'
             if refresh:
                 models=[]; cursor=None; seen=set()
                 while True:
@@ -236,7 +242,7 @@ class Bridge:
                     page=await asyncio.to_thread(rpc.call,'model/list',params); models.extend(page['data']); cursor=page.get('nextCursor')
                     if cursor is None: break
                 self.catalog=models; native.durable(self.data/'catalog.json',models); self.restart_required=True
-            return dict(account=public,models=self.listing() if refresh else None,turns_sent=0,restart_required=self.restart_required)
+            return dict(limits=limits,limits_error=limits_error,checked_at=time.time(),account=public,models=self.listing() if refresh else None,turns_sent=0,restart_required=self.restart_required)
         finally:
             if rpc is not None: await asyncio.to_thread(rpc.close)
 
@@ -244,6 +250,9 @@ class Bridge:
         self.authorize(request)
         # Non-browser custom header avoids ambient cross-origin POSTs; the host's existing local API is the trust boundary.
         if request.headers.get('x-taixu-bridge-control')!='1': raise HTTPException(403,'Use bridge.py management command')
+        if action=='local-usage':
+            from .usage import local_usage
+            return await asyncio.to_thread(local_usage,self.data)
         async with self.management:
             if action=='stop':
                 self.enabled=False; (self.data/'stopped').touch(mode=0o600)
@@ -253,10 +262,10 @@ class Bridge:
                 if not self.enabled:
                     (self.data/'stopped').unlink(missing_ok=True)
                     self.ready=False; self.restart_required=True  # New service generation needs fresh Executor clients.
-            elif action in ('account','refresh-models'):
+            elif action in ('account','refresh-models','usage'):
                 if self.active: raise HTTPException(409,'Management is deferred until the active node finishes')
                 try:
-                    async with asyncio.timeout(60): return await self.management_rpc(action=='refresh-models')
+                    async with asyncio.timeout(60): return await self.management_rpc(action=='refresh-models',usage=action=='usage')
                 except (ValueError,FileNotFoundError) as error:
                     return JSONResponse({'error':str(error)},400)
                 except Exception:
@@ -295,7 +304,7 @@ class Bridge:
         def save(**values):
             old=json.loads(slot.read_text()) if slot.exists() else {}
             old.update(values);native.durable(slot,old)
-        save(state='STARTED',operation=operation,model=body['model'],generation=self.generation)
+        save(state='STARTED',operation=operation,model=body['model'],generation=self.generation,started_at=time.time())
         state.update(operation=operation,model=body['model'],request=request,save=save,
                      enabled=lambda:self.enabled and self.ready,done=asyncio.get_running_loop().create_future())
         self.active[operation]=state

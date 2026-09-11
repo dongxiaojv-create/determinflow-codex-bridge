@@ -2,7 +2,7 @@
 
 在 DeterminFlow 中使用**你自己登录的官方 Codex CLI 账户**。通过插件仓库安装，不需要 Codex 桌面应用，不提供共享账户或共享额度。
 
-**0.3.1 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
+**0.3.2 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
 
 工作流推理强度优先级：任务显式覆盖 → agent 自身设置 → Main 默认 → `high`。0.3.1 修复了 Main 强度覆盖 agent 设置的问题；已创建任务的冻结配置不追溯修改。
 
@@ -64,6 +64,7 @@ Python 3.11+；检查依赖为 `httpx fastapi uvicorn cryptography certifi jsons
 ```sh
 python tests/check_package.py
 python tests/check_selection.py
+python tests/check_usage.py
 CODEX_TEST_RUNTIME=/absolute/path/to/native/codex python tests/check_runtime.py
 CODEX_TEST_RUNTIME=/absolute/path/to/native/codex python tests/check_runtime.py --json-output
 CODEX_TEST_RUNTIME=/absolute/path/to/native/codex python tests/check_runtime.py --validation-feedback
@@ -75,3 +76,13 @@ Runtime 检查使用临时 HOME 和本地合成服务，不读取个人登录、
 ## 许可
 
 插件代码采用 [MIT](LICENSE)。官方 Codex CLI 和 DeterminFlow 使用各自的许可；本仓库不分发其二进制或源码。
+
+### 账户与用量
+
+在 DeterminFlow 的插件列表打开「Codex 账户与用量」。页面自动读取一次，也可手动刷新：
+
+- 账户：通过官方 `account/rateLimits/read` 读取实际 CLI 登录账户的额度窗口、重置时间与 credits 余额；这与该账户其他设备共享，不是人民币或本插件独享余额。不可用时显示未知。
+- 本机：按模型汇总保留调用记录中的输入、输出、缓存、推理 token，显示有记录/总调用次数及缺失数量。它可能包含历史登录账户的调用；只汇总 Runtime 返回的记录，不作为官方完整账单。缓存和推理为子集，不重复加进总量。
+- 刷新不发送模型生成请求。生成期间仍可看本机统计，账户查询需等当前节点结束。
+
+可选页面检查（需已有 Playwright）：`node tests/check_usage_ui.cjs`；可用 `CHROME_PATH` 指定浏览器可执行文件。

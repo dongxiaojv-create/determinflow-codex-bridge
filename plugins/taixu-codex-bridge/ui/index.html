@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Codex 登录状态</title>
-<style>body{font:16px/1.6 system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 20px;color:#e9eef7;background:#101725}button{font:inherit;padding:8px 16px;margin:8px 8px 8px 0;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#1c2738;padding:16px}a{color:#9dc1ff}</style>
+<title>Codex 账户与用量</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 20px;color:#e9eef7;background:#101725}button{font:inherit;padding:8px 16px;margin:8px 8px 8px 0;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#1c2738;padding:16px}a{color:#9dc1ff}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid #35445a}.scroll{overflow-x:auto}h2{margin-top:28px}</style>
 <h1>Codex Bridge</h1>
 <p>先在终端运行 <code>codex login</code>，通过官方浏览器页面登录自己的账户。此插件不接收密码，也不上传登录凭据。</p>
 <p>插件复用当前系统用户的 Codex CLI 登录，模型调用会消耗该账户额度。更换账户请在终端运行 <code>codex logout</code> 后重新登录。</p>
@@ -9,6 +9,14 @@
 <button id="account">检查登录状态</button><button id="models">刷新模型目录</button>
 <pre id="result" role="status" aria-live="polite">尚未检查账户。检查和刷新目录不发送模型生成请求。</pre>
 <p>刷新目录后重启 DeterminFlow，再在模型菜单选择 Codex Bridge。未登录时请先完成官方登录。</p>
+<h2>账户额度</h2>
+<p>当前登录账户共享的额度，包含其他设备和 Codex 任务。Credits 不是人民币；不同额度窗口不能相加。</p>
+<button id="usage">刷新额度与用量</button>
+<pre id="limits" role="status" aria-live="polite">尚未读取。</pre>
+<h2>本机桥接 Token</h2>
+<p>统计本插件保留的全部调用记录，可能包含此前登录账户的调用。缓存输入包含在输入中，推理包含在输出中，不要重复相加。缺失记录不算零；这不是官方扣费账单。</p>
+<p id="coverage" role="status" aria-live="polite">尚未读取。</p>
+<div class="scroll"><table><thead><tr><th>模型</th><th>有记录 / 调用</th><th>输入</th><th>输出</th><th>总 Token</th><th>缓存输入</th><th>推理</th></tr></thead><tbody id="tokens"></tbody></table></div>
 <script>
 const result=document.getElementById('result');
 async function check(action){
@@ -23,4 +31,51 @@ async function check(action){
  }catch(error){result.textContent=error.message;}finally{buttons.forEach(b=>b.disabled=false);}
 }
 document.getElementById('account').onclick=()=>check('account');document.getElementById('models').onclick=()=>check('refresh-models');
+const limits=document.getElementById('limits'),coverage=document.getElementById('coverage');
+const number=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString():'未知';
+async function readUsage(action){
+ const response=await fetch('/api/taixu-codex-bridge/control/'+action,{method:'POST',headers:{'X-Taixu-Bridge-Control':'1'}});
+ const data=await response.json();if(!response.ok)throw new Error(data.error||data.detail||'读取失败');return data;
+}
+function renderLimits(data){
+ const lines=['账户：'+(data.account?.email||data.account?.type||'未登录'),'查询时间：'+new Date(data.checked_at*1000).toLocaleString()];
+ if(data.limits_error)lines.push(data.limits_error);
+ if(!data.limits?.length)lines.push('额度：未知');
+ for(const bucket of data.limits||[]){
+  lines.push('\n'+(bucket.limitName||bucket.id)+(bucket.planType?' · '+bucket.planType:''));
+  const credits=bucket.credits;
+  lines.push('Credits 余额：'+(credits?.unlimited===true?'不限额':credits?.balance!=null?String(credits.balance):'未知'));
+  for(const key of ['primary','secondary']){
+   const w=bucket[key];if(!w)continue;
+   const used=w.usedPercent,remaining=typeof used==='number'&&Number.isFinite(used)?Math.max(0,Math.min(100,100-used)):null;
+   const mins=w.windowDurationMins;
+   const duration=typeof mins==='number'?(mins%1440===0?mins/1440+' 天':mins%60===0?mins/60+' 小时':mins+' 分钟'):'未知周期';
+   lines.push(duration+'额度：已用 '+number(used)+'%，剩余 '+number(remaining)+'%；重置：'+(typeof w.resetsAt==='number'?new Date(w.resetsAt*1000).toLocaleString():'未知'));
+  }
+ }
+ limits.textContent=lines.join('\n');
+}
+function renderTokens(data){
+ const t=data.totals;
+ coverage.textContent='本机已知总 Token：'+(t.known?number(t.total):'未知')+'；有用量记录 '+t.known+' / '+t.requests+' 次，缺失 '+(t.requests-t.known)+' 次，无法读取 '+data.unreadable+' 份。'+(t.known<t.requests||data.unreadable?' 当前仅为已知部分合计。':'');
+ const body=document.getElementById('tokens');body.replaceChildren();
+ for(const row of data.models){
+  const tr=document.createElement('tr');
+  const optional=(key)=>row[key+'_known']?number(row[key])+(row[key+'_known']<row.requests?'（部分）':''):'未知';
+  for(const value of [row.model,row.known+' / '+row.requests,...['input','output','total'].map(k=>row.known?number(row[k]):'未知'),optional('cached'),optional('reasoning')]){
+   const td=document.createElement('td');td.textContent=value;tr.append(td);
+  }
+  body.append(tr);
+ }
+}
+async function refreshUsage(){
+ const button=document.getElementById('usage');button.disabled=true;
+ limits.textContent='正在读取账户额度…';coverage.textContent='正在读取本机用量…';document.getElementById('tokens').replaceChildren();
+ await Promise.all([
+  readUsage('usage').then(renderLimits).catch(e=>limits.textContent='额度未知：'+e.message),
+  readUsage('local-usage').then(renderTokens).catch(e=>coverage.textContent='用量未知：'+e.message),
+ ]);button.disabled=false;
+}
+document.getElementById('usage').onclick=refreshUsage;
+refreshUsage();
 </script></html>
