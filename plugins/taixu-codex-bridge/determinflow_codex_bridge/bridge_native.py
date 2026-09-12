@@ -274,15 +274,25 @@ def failure_diagnostic(state,operation):
                 message=f'Codex 请求失败（阶段：{stage}，编号：{operation}）。{detail}')
 
 
-async def run_chat(state,normalized,operation):
+async def run_chat(state,normalized,operation,on_text=None):
     """One disposable Runtime per Deter request; Deter alone executes returned tools."""
     from .bridge_contract import checked_schema,require_json_object
     from jsonschema.exceptions import ValidationError
     note=state['note'];rpc=None;tid=uid=None;terminal=None;failure=None;calls=[];items=[];usage=None;interrupted=False
     validation_feedback_count=0
+    live_text=on_text if (normalized.get('response_format') or {}).get('type','text')=='text' else None
+    agent_id=None;sent_text=''
     async def admission():
         if not state['enabled']():raise RuntimeError('Provider stopped')
-        if await state['request'].is_disconnected():raise RuntimeError('HTTP request disconnected')
+        # Once SSE starts, StreamingResponse owns disconnect detection and cancels this task.
+        if not state.get('streaming') and await state['request'].is_disconnected():raise RuntimeError('HTTP request disconnected')
+    async def emit_text(delta):
+        nonlocal sent_text
+        if not isinstance(delta,str):raise ValueError('Runtime text delta must be a string')
+        if live_text:
+            if not sent_text and items:await live_text('\n')
+            if delta:await live_text(delta)
+        sent_text+=delta
     def tool_call(message,allow_feedback=False):
         nonlocal validation_feedback_count
         p=message.get('params',{})
@@ -333,6 +343,7 @@ async def run_chat(state,normalized,operation):
         state['stage']='turn_submission';state['turn_submission_attempted']=True
         uid=(await asyncio.to_thread(rpc.call,'turn/start',params))['turn']['id']
         state['stage']='generation'
+        if on_text:await on_text('')  # Start SSE after submission; setup failures still return HTTP 400.
         while True:
             await admission()
             messages=rpc.pending[:];rpc.pending.clear()
@@ -348,15 +359,29 @@ async def run_chat(state,normalized,operation):
                     if p.get('threadId')!=tid or p.get('turnId')!=uid:raise ValueError('Runtime item identity mismatch')
                     item=p['item']
                     if item['type'] not in ('userMessage','agentMessage','reasoning','dynamicToolCall'):raise ValueError('Runtime attempted a non-Deter tool: '+item['type'])
-                    if method=='item/completed' and item['type']=='agentMessage':items.append(item.get('text',''))
+                    if item['type']=='agentMessage':
+                        if method=='item/started':
+                            if agent_id is not None:raise ValueError('Runtime interleaved assistant messages')
+                            agent_id=item['id'];sent_text=''
+                        else:
+                            if agent_id!=item['id']:raise ValueError('Runtime assistant message identity mismatch')
+                            text=item.get('text','')
+                            if not isinstance(text,str) or not text.startswith(sent_text):raise ValueError('Runtime final text differs from streamed text')
+                            await emit_text(text[len(sent_text):])
+                            items.append(text);agent_id=None;sent_text=''
+                elif method=='item/agentMessage/delta':
+                    if p.get('threadId')!=tid or p.get('turnId')!=uid or p.get('itemId')!=agent_id or agent_id is None:raise ValueError('Runtime text delta identity mismatch')
+                    if p['delta']!='':await emit_text(p['delta'])
                 elif method=='thread/tokenUsage/updated' and p.get('threadId')==tid and p.get('turnId')==uid:usage=p['tokenUsage'].get('last')
                 elif method=='turn/completed' and p.get('threadId')==tid and p['turn']['id']==uid:terminal=p['turn']
             if calls or terminal is not None:break
             await asyncio.sleep(.01)
+        if agent_id is not None:raise ValueError('Runtime assistant message is incomplete')
         if not calls and (terminal is None or terminal.get('status')!='completed' or terminal.get('error') is not None):raise RuntimeError('Runtime did not complete: '+str(terminal))
     except BaseException as error:
         failure=error
     finally:
+        state['closing_runtime']=True
         if rpc is not None:
             if uid is None and tid:
                 started=[e['params']['turn']['id'] for e in rpc.events if e.get('method')=='turn/started' and e['params'].get('threadId')==tid]
@@ -407,6 +432,6 @@ async def run_chat(state,normalized,operation):
         counts={'prompt_tokens':usage['inputTokens'],'completion_tokens':usage['outputTokens'],'total_tokens':usage['totalTokens']}
         if 'reasoningOutputTokens' in usage:counts['completion_tokens_details']={'reasoning_tokens':usage['reasoningOutputTokens']}
         if 'cachedInputTokens' in usage:counts['prompt_tokens_details']={'cached_tokens':usage['cachedInputTokens']}
-    completion=dict(id='chatcmpl-'+operation,object='chat.completion',created=int(time.time()),model=normalized['model'],choices=[{'index':0,'message':message,'finish_reason':'tool_calls' if calls else 'stop'}],usage=None if normalized['stream'] and not normalized['include_usage'] else counts,bridge_capabilities=normalized['capability_notes'])
+    completion=dict(id='chatcmpl-'+operation,object='chat.completion',created=state.get('created',int(time.time())),model=normalized['model'],choices=[{'index':0,'message':message,'finish_reason':'tool_calls' if calls else 'stop'}],usage=None if normalized['stream'] and not normalized['include_usage'] else counts,bridge_capabilities=normalized['capability_notes'])
     durable(state['out']/'chat-completion.json',completion)
     return completion

@@ -1,8 +1,12 @@
-# 0.3.6 发布验证
+# 0.3.7 发布验证
 
 日期：2026-09-12。此版本为 macOS Apple Silicon 预览版。
 
 ## 已验证
+
+- 0.3.7：普通正文经 Runtime 的文字增量实时交付；按消息 ID 和完整正文前缀校验，补齐缺失尾部并拒绝交错/不一致输出。JSON 和工具参数保持完整校验后交付。
+- `tests/check_streaming.py`：真实本地 HTTP 连接用 gate 证明终态之前已收到正文；检查无重复、usage、流开始前/中途错误、断开和停用回收、静默期间空分块。可选真实 Core/OpenAI/LangChain 检查确认流中错误不自动重试，LangGraph 裸循环 break 会关闭 HTTP 连接。
+- `tests/check_runtime_streaming.py`：固定官方 Runtime + 空 HOME + 本地合成服务，验证真实增量、多消息/补尾、内部推理隔离、JSON/Schema 成功及失败、冲突/交错拒绝；取消收到中断确认且进程退出。8 次本机合成请求、0 次官方模型请求。
 
 - 0.3.6：真实桌面版冻结后端复现旧 `-m` 入口的 `ModuleNotFoundError`；改为绝对脚本入口后，空目录完成官方 Runtime 下载、双 SHA256 校验和 11 项模型目录准备（本机约 13 秒），未读取用户登录或发送生成请求。
 - `tests/check_onboarding.py`：从 manifest 读取真实命令，通过不含插件 cwd 的隔离 Python 路径检查；`DETERMINFLOW_DESKTOP_PYTHON` 可直接指定冻结后端，本次亦通过该路径。

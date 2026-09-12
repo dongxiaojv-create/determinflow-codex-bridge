@@ -34,9 +34,11 @@ jobs:
           python tests/check_selection.py
           python tests/check_usage.py
           python tests/check_diagnostics.py
+          python tests/check_streaming.py
           python tests/check_onboarding.py
           node tests/check_usage_ui.cjs
           python tests/check_runtime.py
+          python tests/check_runtime_streaming.py
           python tests/check_runtime.py --json-output
           python tests/check_runtime.py --validation-feedback
           python tests/check_runtime.py --validation-feedback --invalid-again

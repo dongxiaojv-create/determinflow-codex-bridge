@@ -140,9 +140,14 @@ def validate_chat(body):
                 required_tool=required,parallel_tool_calls=parallel,stream=stream,include_usage=options.get('include_usage',False),response_format=response_format,output_schema=output_schema,capability_notes=notes)
 
 
-def chat_sse(completion):
+def chat_delta(completion,delta):
+    base={key:completion[key] for key in ('id','created','model')};base['object']='chat.completion.chunk'
+    return 'data: '+json.dumps(dict(base,choices=[{'index':0,'delta':delta,'finish_reason':None}]),ensure_ascii=False)+'\n\n'
+
+
+def chat_sse(completion,content_sent=False):
     choice=completion['choices'][0];message=choice['message'];delta={'role':'assistant'}
-    if message.get('content') is not None:delta['content']=message['content']
+    if not content_sent and message.get('content') is not None:delta['content']=message['content']
     if message.get('tool_calls'):delta['tool_calls']=[dict(call,index=i) for i,call in enumerate(message['tool_calls'])]
     base={key:completion[key] for key in ('id','created','model')};base['object']='chat.completion.chunk'
     if completion.get('bridge_capabilities'):base['bridge_capabilities']=completion['bridge_capabilities']

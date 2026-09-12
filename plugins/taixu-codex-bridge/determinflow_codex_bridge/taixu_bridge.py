@@ -6,10 +6,10 @@ from fastapi import APIRouter,FastAPI,HTTPException,Request
 from fastapi.responses import JSONResponse,StreamingResponse
 from src.extension_api import ExtensionManifest
 from . import bridge_native as native
-from .bridge_contract import validate_chat,chat_sse
+from .bridge_contract import validate_chat,chat_sse,chat_delta
 
 OWNER='taixu-codex-bridge'; PROVIDER='taixu_codex_limited'
-PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.6'
+PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.7'
 
 def build_request(params,provider,**clients):
     return {'client_kwargs':clients,'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}
@@ -301,6 +301,9 @@ class Bridge:
     async def drain(self):
         running=list(self.active.values())
         if not running:return
+        for state in running:
+            task=state.get('task')
+            if task and not task.done() and not task.cancelling() and not state.get('closing_runtime'):task.cancel()
         try:await asyncio.wait_for(asyncio.gather(*(asyncio.shield(state['done']) for state in running)),20)
         except TimeoutError:
             await asyncio.gather(*(asyncio.to_thread(state['rpc'].close) for state in running if state.get('rpc')),return_exceptions=True)
@@ -344,25 +347,73 @@ class Bridge:
             old=json.loads(slot.read_text()) if slot.exists() else {}
             old.update(values);native.durable(slot,old)
         save(state='STARTED',operation=operation,model=body['model'],generation=self.generation,started_at=time.time())
-        state.update(operation=operation,model=body['model'],request=request,save=save,
+        state.update(operation=operation,model=body['model'],request=request,save=save,created=int(time.time()),
                      enabled=lambda:self.enabled and self.ready,done=asyncio.get_running_loop().create_future())
         self.active[operation]=state
-        try:
-            completion=await native.run_chat(state,body,operation)
-            save(state='COMPLETED',finish_reason=completion['choices'][0]['finish_reason'],usage=completion.get('usage'))
-            if body.get('stream'):
-                return StreamingResponse(iter([chat_sse(completion)]),media_type='text/event-stream')
-            return JSONResponse(completion)
-        except asyncio.CancelledError:
-            save(state='CANCELLED_LOCALLY',diagnostic=native.failure_diagnostic(state,operation))
-            raise
-        except Exception as error:
-            diagnostic=native.failure_diagnostic(state,operation)
-            save(state='FAILED_OR_UNKNOWN',error_type=type(error).__name__,diagnostic=diagnostic)
-            self.note('request_failed',error_type=type(error).__name__,**diagnostic)
-            # Core and OpenAI clients do not automatically retry HTTP 400.
-            return JSONResponse({'error':diagnostic},400)
-        finally:
-            state['done'].set_result(None);self.active.pop(operation,None)
+        chunks=asyncio.Queue(32) if body['stream'] else None
+        async def generate():
+            state['task']=asyncio.current_task()
+            try:
+                completion=await native.run_chat(state,body,operation,on_text=chunks.put if chunks is not None else None)
+                save(state='COMPLETED',finish_reason=completion['choices'][0]['finish_reason'],usage=completion.get('usage'))
+                return JSONResponse(completion)
+            except asyncio.CancelledError:
+                diagnostic=native.failure_diagnostic(state,operation)
+                save(state='CANCELLED_LOCALLY',diagnostic=diagnostic)
+                if chunks is None:raise
+                while not chunks.empty():chunks.get_nowait()
+                return JSONResponse({'error':diagnostic},400)
+            except Exception as error:
+                diagnostic=native.failure_diagnostic(state,operation)
+                save(state='FAILED_OR_UNKNOWN',error_type=type(error).__name__,diagnostic=diagnostic)
+                self.note('request_failed',error_type=type(error).__name__,**diagnostic)
+                # Core and OpenAI clients do not automatically retry HTTP 400.
+                return JSONResponse({'error':diagnostic},400)
+            finally:
+                state['done'].set_result(None);self.active.pop(operation,None)
+        if chunks is None:return await generate()
+        producer=asyncio.create_task(generate())
+        state['task']=producer
+        async def next_chunk(timeout=None):
+            if not chunks.empty():return chunks.get_nowait()
+            if producer.done():return producer.result()
+            received=asyncio.create_task(chunks.get())
+            try:
+                await asyncio.wait((received,producer),timeout=timeout,return_when=asyncio.FIRST_COMPLETED)
+                if received.done():return received.result()
+            finally:received.cancel()
+            return producer.result() if producer.done() else ''
+        async def cancel():
+            if not producer.done() and not producer.cancelling() and not state.get('closing_runtime'):producer.cancel()
+            with contextlib.suppress(asyncio.CancelledError):await asyncio.shield(producer)
+            if producer.cancelled() and not state['done'].done():
+                save(state='CANCELLED_LOCALLY',diagnostic=native.failure_diagnostic(state,operation))
+                state['done'].set_result(None);self.active.pop(operation,None)
+        try:first=await next_chunk()
+        except BaseException:
+            await cancel();raise
+        if isinstance(first,JSONResponse):
+            await producer
+            if first.status_code!=200:return first
+        state['streaming']=True
+        async def stream():
+            base=dict(id='chatcmpl-'+operation,created=state['created'],model=body['model'])
+            part=first;content_sent=False
+            try:
+                yield chat_delta(base,{'role':'assistant'})
+                while True:
+                    if isinstance(part,JSONResponse):
+                        if part.status_code==200:yield chat_sse(json.loads(part.body),content_sent=content_sent)
+                        else:yield 'data: '+part.body.decode()+'\n\n'
+                        break
+                    if part:
+                        content_sent=True
+                        yield chat_delta(base,{'content':part})
+                    part=await next_chunk(1)
+                    if part=='':
+                        # Core checks its stop flag on model chunks, including empty ones.
+                        yield chat_delta(base,{})
+            finally:await cancel()
+        return StreamingResponse(stream(),media_type='text/event-stream')
 
 def create_extension(): return Bridge()

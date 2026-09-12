@@ -2,7 +2,7 @@
 
 在 DeterminFlow 中使用**你自己登录的官方 Codex CLI 账户**。通过插件仓库安装，不需要 Codex 桌面应用，不提供共享账户或共享额度。
 
-**0.3.6 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
+**0.3.7 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
 
 工作流推理强度优先级：任务显式覆盖 → agent 自身设置 → Main 默认 → `high`。0.3.1 修复了 Main 强度覆盖 agent 设置的问题；已创建任务的冻结配置不追溯修改。
 
@@ -44,7 +44,8 @@ Bridge 使用当前系统用户的 `CODEX_HOME`（默认 `~/.codex`）；凭据�
 - 保留指定模型，不自动替换；模型目录可见不等于账户已获该模型访问权。
 - JSON 对象/Schema 和严格工具参数有本地校验；不能宣称等价于原生严格约束解码。
 - Runtime 未提供 temperature/top_p/penalty 的语义映射，插件不会伪装为支持。
-- 当前是完整结果返回后包装为 SSE，**不是真正逐 token 流式输出**。长推理需在模型参数设置足够的流式分块超时。
+- 普通文字实时逐段返回；JSON 对象/Schema 在完整校验后交付，工具参数在校验和 Runtime 中断确认后交回。不会把内部推理内容当正文输出。
+- 生成开始后每秒发送空分块，让宿主在静默推理和 JSON 等待期间也能处理停止；断开连接或停用时中断并回收 Runtime。开始流式前的失败返回 HTTP 400，流中失败明确返回错误，不伪造成功结尾或主动重试。
 - 请求失败或断开后，远端是否完成及用量可能未知；不会把未知当零用量。
 
 ## 开发检查
@@ -55,14 +56,19 @@ Python 3.11+；检查依赖为 `httpx fastapi uvicorn cryptography certifi jsons
 python tests/check_package.py
 python tests/check_selection.py
 python tests/check_usage.py
+python tests/check_diagnostics.py
+python tests/check_streaming.py
 python tests/check_onboarding.py
 CODEX_TEST_RUNTIME=/absolute/path/to/native/codex python tests/check_runtime.py
+CODEX_TEST_RUNTIME=/absolute/path/to/native/codex python tests/check_runtime_streaming.py
 CODEX_TEST_RUNTIME=/absolute/path/to/native/codex python tests/check_runtime.py --json-output
 CODEX_TEST_RUNTIME=/absolute/path/to/native/codex python tests/check_runtime.py --validation-feedback
 CODEX_TEST_RUNTIME=/absolute/path/to/native/codex python tests/check_runtime.py --validation-feedback --invalid-again
 ```
 
 Runtime 检查使用临时 HOME 和本地合成服务，不读取个人登录、不调用官方模型。发布验证范围见 [VALIDATION.md](VALIDATION.md)；第二台真实电脑安装和真实账户调用尚待验证。
+
+可设置 `DETERMINFLOW_CORE_ROOT` 为本地 Core 源码目录，再运行 `tests/check_streaming.py`，验证真实 SDK/Core 对流中错误的重试抑制、空分块和停止时关闭连接。
 
 `tests/check_onboarding.py` 在设置 `CODEX_TEST_RUNTIME` 后还检查桌面生命周期脚本入口；可设置 `DETERMINFLOW_DESKTOP_PYTHON` 为实际桌面版内置后端，直接验证冻结运行环境。
 
