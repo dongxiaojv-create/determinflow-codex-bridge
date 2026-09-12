@@ -58,6 +58,20 @@ async def main():
         messages=[{'role':'system','content':'SYNTHETIC SYSTEM PRESERVED'}, {'role':'developer','content':'SYNTHETIC DEVELOPER PRESERVED'}, {'role':'user','content':'SYNTHETIC CALL THE DETER TOOL'}]
         body=dict(model='gpt-5.6-sol',reasoning_effort='medium',stream=True,messages=messages,tools=tools)
         if json_mode:body['response_format']={'type':'json_object'}
+        def check_requests():
+            for record in records:
+                assert record['model']==body['model'] and record['reasoning']['effort']==body['reasoning_effort']
+                specs=list(record.get('tools',[]))
+                for item in record['input']:
+                    if item.get('type')=='additional_tools':specs.extend(item['tools'])
+                for spec in specs:
+                    assert spec.get('name') not in ('collaboration','followup_task','interrupt_agent','list_agents','send_message','spawn_agent','wait_agent'), 'Runtime advertised extra agent tools'
+                    specs.extend(spec.get('tools',[]))
+                blocks=[(item.get('role'),block['text']) for item in record['input'] if item.get('type')=='message' for block in item.get('content',[]) if 'text' in block]
+                for role,marker in (('developer','SYNTHETIC SYSTEM PRESERVED'),('developer','SYNTHETIC DEVELOPER PRESERVED'),('user','SYNTHETIC CALL THE DETER TOOL')):
+                    assert blocks.count((role,marker))==1, 'Original message missing or repeated'
+                assert not any(text.startswith(('You are `/root`, the primary agent in a team of agents','<multi_agent_mode>')) for role,text in blocks if role=='developer'), 'Runtime injected extra agent instructions'
+                assert ('Response format: return exactly one valid JSON object' in json.dumps(record)) is json_mode
         s,op=state()
         if invalid_again:
             try:await asyncio.wait_for(native.run_chat(s,validate_chat(body),op),15)
@@ -65,6 +79,7 @@ async def main():
             else:raise AssertionError('Repeated invalid arguments passed')
             assert len(records)==2 and s['runtime_result']['validation_feedback_count']==1
             assert s['rpc'].proc.poll() is not None
+            check_requests()
             print('PASS: repeated invalid arguments stop after one feedback; no business tool handoff')
             server.shutdown();server.server_close();return
         first=await asyncio.wait_for(native.run_chat(s,validate_chat(body),op),15)
@@ -81,8 +96,7 @@ async def main():
         assert second['choices'][0]['message']['content']==answer
         assert second['choices'][0]['finish_reason']=='stop' and s['rpc'].proc.poll() is not None
         assert len(records)==(3 if repair else 2),len(records)
-        for record in records:
-            assert ('Response format: return exactly one valid JSON object' in json.dumps(record)) is json_mode
+        check_requests()
         if json_mode:
             assert json.loads(second['choices'][0]['message']['content'])['answer']=='SYNTHETIC TOOL RESULT RECEIVED'
         assert any(x.get('call_id')==call['id'] and x.get('output')=='SYNTHETIC DETER EXECUTED RESULT' for x in records[-1]['input'])

@@ -2,7 +2,7 @@
 
 在 DeterminFlow 中使用**你自己登录的官方 Codex CLI 账户**。通过插件仓库安装，不需要 Codex 桌面应用，不提供共享账户或共享额度。
 
-**0.3.8 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
+**0.3.9 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
 
 工作流推理强度优先级：任务显式覆盖 → agent 自身设置 → Main 默认 → `high`。0.3.1 修复了 Main 强度覆盖 agent 设置的问题；已创建任务的冻结配置不追溯修改。
 
@@ -41,6 +41,7 @@ Bridge 使用当前系统用户的 `CODEX_HOME`（默认 `~/.codex`）；凭据�
 
 - 普通聊天、工作流、多轮文字历史；模型工具调用交回 DeterminFlow 执行。
 - 每次请求使用独立 Runtime，会话不共享；后续请求由 DeterminFlow 提供完整历史。
+- 关闭桥接器不使用的 Runtime 自带多代理工具和说明，减少固定输入开销；Deter/Bishu 的 agent、业务工具和完整历史保持原样。
 - 保留指定模型，不自动替换；模型目录可见不等于账户已获该模型访问权。
 - 桥接器子进程明确使用 `default` 服务档位，避免继承 Codex 客户端的 `priority` 设置后无法通过配置检查；不改写用户 Codex 配置。
 - JSON 对象/Schema 和严格工具参数有本地校验；不能宣称等价于原生严格约束解码。

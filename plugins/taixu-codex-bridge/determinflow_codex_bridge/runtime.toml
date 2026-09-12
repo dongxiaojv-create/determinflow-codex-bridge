@@ -10,6 +10,8 @@ include_environment_context = false
 include_permissions_instructions = false
 include_apps_instructions = false
 include_collaboration_mode_instructions = false
+[agents]
+enabled = false
 [model_providers.fixture]
 name = "Phase 0 local fixture, NOT OpenAI"
 base_url = "http://127.0.0.1:57550/v1"
