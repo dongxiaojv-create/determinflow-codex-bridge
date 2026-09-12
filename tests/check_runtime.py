@@ -33,6 +33,10 @@ async def main():
                   {'type':'custom_tool_call','id':'fc-fixture','call_id':'call-fixture','name':'exec','input':'const r = await tools.deter_0('+ ('{}' if invalid else '{value: "ok"}') +'); text(r);'})
             events=[{'type':'response.created','response':{'id':'resp-fixture'}},{'type':'response.output_item.done','item':item},
                     {'type':'response.completed','response':{'id':'resp-fixture','usage':{'input_tokens':10,'output_tokens':3,'total_tokens':13}}}]
+            if json_mode:
+                events.insert(1,{'type':'response.output_item.done','item':{
+                    'type':'message','id':'msg-progress','role':'assistant','phase':'commentary',
+                    'content':[{'type':'output_text','text':'SYNTHETIC PROGRESS'}]}})
             payload=''.join('data: '+json.dumps(e)+'\n\n' for e in events).encode()
             self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -90,6 +94,7 @@ async def main():
             assert s['runtime_result']['validation_feedback_count']==1
             assert 'NOT executed' in json.dumps(records[1]['input'])
         assert first['choices'][0]['finish_reason']=='tool_calls'
+        if json_mode:assert first['choices'][0]['message']['content'] is None, 'Progress leaked into JSON tool response'
         call=first['choices'][0]['message']['tool_calls'][0]
         assert call['function']=={'name':'shell','arguments':'{"value":"ok"}'} and s['runtime_result']['interrupted']
         assert s['rpc'].proc.poll() is not None

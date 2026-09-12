@@ -59,10 +59,15 @@ async def check(binary,case):
                 elif case=='interleaved':
                     start(0);delta(0,'Hel');start(1);delta(1,'Other')
                     done(0,'Hello');done(1,'Other')
+                elif case in ('json_commentary','schema_commentary'):
+                    start(0,'commentary');delta(0,'Preparing the result.')
+                    done(0,'Preparing the result.','commentary')
+                    start(1);delta(1,answer);done(1,answer)
                 else:
-                    start(0);delta(0,answer[:6])
+                    phase=None if case=='json_legacy' else 'commentary' if case=='json_commentary_only' else 'final_answer'
+                    start(0,phase);delta(0,answer[:6])
                     if case=='cancel' and not gate.wait(10):raise AssertionError('Cancellation gate timed out')
-                    delta(0,answer[6:]);done(0,'Corrected.' if case=='mismatch' else answer)
+                    delta(0,answer[6:]);done(0,'Corrected.' if case=='mismatch' else answer,phase)
                 completed.set()
                 event({'type':'response.completed','response':{'id':'resp-stream-fixture',
                     'usage':{'input_tokens':10,'output_tokens':3,'total_tokens':13}}})
@@ -91,8 +96,8 @@ async def check(binary,case):
                        note=lambda *args,**kwargs:None,enabled=lambda:True,request=Request(),expected_runtime=expected)
             body=dict(model='gpt-5.6-sol',reasoning_effort='low',stream=True,
                       stream_options={'include_usage':True},messages=[{'role':'user','content':'SYNTHETIC STREAM FIXTURE'}])
-            if case in ('json','invalid_json'):body['response_format']={'type':'json_object'}
-            if case in ('schema','invalid_schema'):
+            if case in ('json','invalid_json','json_commentary','json_commentary_only','json_legacy'):body['response_format']={'type':'json_object'}
+            if case in ('schema','invalid_schema','schema_commentary'):
                 body['response_format']={'type':'json_schema','json_schema':{'name':'answer','strict':True,
                     'schema':{'type':'object','properties':{'answer':{'type':'string'}},
                               'required':['answer'],'additionalProperties':False}}}
@@ -114,13 +119,13 @@ async def check(binary,case):
                     assert state['runtime_result']['interrupted'] is True
                     assert state['runtime_result']['terminal']['status']=='interrupted'
                     assert state['runtime_result']['usage'] is None and state['runtime_result']['usage_scope']=='unknown'
-                elif case in ('invalid_json','invalid_schema','mismatch','interleaved'):
+                elif case in ('invalid_json','json_commentary_only','invalid_schema','mismatch','interleaved'):
                     try:await asyncio.wait_for(task,15)
                     except ValueError as error:
-                        if case in ('invalid_json','invalid_schema'):
+                        if case in ('invalid_json','json_commentary_only','invalid_schema'):
                             assert state['stage']=='result_validation'
                             assert state['runtime_result']['terminal']['status']=='completed'
-                        if case=='invalid_json':assert isinstance(error,json.JSONDecodeError)
+                        if case in ('invalid_json','json_commentary_only'):assert isinstance(error,json.JSONDecodeError)
                         if case=='invalid_schema':assert 'Output failed JSON Schema validation' in str(error)
                         if case=='mismatch':assert 'differs from streamed text' in str(error)
                         if case=='interleaved':assert 'interleaved assistant messages' in str(error)
@@ -136,10 +141,10 @@ async def check(binary,case):
                         assert any(e.get('params',{}).get('item',{}).get('type')=='reasoning'
                                    for e in state['rpc'].events), 'Fixture did not reach Runtime reasoning events'
                 assert chunks[0]==''
-                if case in ('json','invalid_json','schema','invalid_schema'):
+                if 'response_format' in body:
                     assert chunks==[''], 'JSON text escaped before complete validation'
                 assert 'REASONING_FIXTURE_MARKER' not in ''.join(chunks)
-                if case in ('invalid_json','invalid_schema','mismatch','interleaved','cancel'):
+                if case in ('invalid_json','json_commentary_only','invalid_schema','mismatch','interleaved','cancel'):
                     assert not (state['out']/'chat-completion.json').exists(), 'Failure persisted a successful completion'
                 assert state['rpc'].proc.poll() is not None, 'Runtime survived request completion/cancellation'
                 assert config_file.read_bytes()==config_before, 'Bridge changed the user configuration'
@@ -158,9 +163,9 @@ async def check(binary,case):
 async def main():
     binary=find_runtime(os.environ.get('CODEX_TEST_RUNTIME',''))  # Verifies Runtime and code-mode-host hashes.
     assert subprocess.check_output([str(binary),'--version'],text=True).strip()=='codex-cli 0.153.4'
-    for case in ('text','json','invalid_json','schema','invalid_schema','mismatch','interleaved','cancel'):
+    for case in ('text','json','json_commentary','json_commentary_only','json_legacy','invalid_json','schema','schema_commentary','invalid_schema','mismatch','interleaved','cancel'):
         await check(binary,case)
-    print('PASS: pinned Runtime live deltas, message boundaries, JSON validation, reasoning isolation, confirmed cancellation, child-only service tier override; 8 local requests, 0 official model calls')
+    print('PASS: pinned Runtime live deltas, JSON phase isolation and legacy compatibility, validation, reasoning isolation, confirmed cancellation, child-only service tier override; 12 local requests, 0 official model calls')
 
 
 if __name__=='__main__':asyncio.run(main())

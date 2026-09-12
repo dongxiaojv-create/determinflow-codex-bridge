@@ -280,7 +280,8 @@ async def run_chat(state,normalized,operation,on_text=None):
     from jsonschema.exceptions import ValidationError
     note=state['note'];rpc=None;tid=uid=None;terminal=None;failure=None;calls=[];items=[];usage=None;interrupted=False
     validation_feedback_count=0;usage_scope='unknown'
-    live_text=on_text if (normalized.get('response_format') or {}).get('type','text')=='text' else None
+    structured_output=(normalized.get('response_format') or {}).get('type','text')!='text'
+    live_text=None if structured_output else on_text
     agent_id=None;sent_text=''
     async def admission():
         if not state['enabled']():raise RuntimeError('Provider stopped')
@@ -368,7 +369,9 @@ async def run_chat(state,normalized,operation,on_text=None):
                             text=item.get('text','')
                             if not isinstance(text,str) or not text.startswith(sent_text):raise ValueError('Runtime final text differs from streamed text')
                             await emit_text(text[len(sent_text):])
-                            items.append(text);agent_id=None;sent_text=''
+                            # Runtime progress is not part of a structured final answer; null phases remain compatible.
+                            if not structured_output or item.get('phase')!='commentary':items.append(text)
+                            agent_id=None;sent_text=''
                 elif method=='item/agentMessage/delta':
                     if p.get('threadId')!=tid or p.get('turnId')!=uid or p.get('itemId')!=agent_id or agent_id is None:raise ValueError('Runtime text delta identity mismatch')
                     if p['delta']!='':await emit_text(p['delta'])
