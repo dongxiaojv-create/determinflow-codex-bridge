@@ -9,7 +9,7 @@ from . import bridge_native as native
 from .bridge_contract import validate_chat,chat_sse,chat_delta
 
 OWNER='taixu-codex-bridge'; PROVIDER='taixu_codex_limited'
-PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.10'
+PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.11'
 
 def build_request(params,provider,**clients):
     return {'client_kwargs':clients,'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}
@@ -409,7 +409,7 @@ class Bridge:
                 yield chat_delta(base,{'role':'assistant'})
                 while True:
                     if isinstance(part,JSONResponse):
-                        if part.status_code==200:yield chat_sse(json.loads(part.body),content_sent=content_sent)
+                        if part.status_code==200:yield chat_sse(json.loads(part.body),content_sent=content_sent,role_sent=True)
                         else:yield 'data: '+part.body.decode()+'\n\n'
                         break
                     if part:

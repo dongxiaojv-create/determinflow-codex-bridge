@@ -100,6 +100,8 @@ async def http_checks():
                             assert not run.closed.is_set() and bridge.active
                             run.gate.set();tail=[line async for line in lines]
                         chunks=[first]+[json.loads(line[6:]) for line in tail if line.startswith('data: ') and line!='data: [DONE]']
+                        # The opening frame already sent the role. SDK snapshot merging concatenates repeated roles.
+                        assert all('role' not in c['choices'][0]['delta'] for c in chunks if c.get('choices')),chunks
                         assert ''.join(c['choices'][0]['delta'].get('content','') for c in chunks if c.get('choices'))=='early late',chunks
                         assert [c['choices'][0]['finish_reason'] for c in chunks if c.get('choices') and c['choices'][0]['finish_reason']]==['tool_calls' if mode=='tools' else 'stop']
                         assert [c['usage'] for c in chunks if c.get('usage')]==[dict(prompt_tokens=7,completion_tokens=3,total_tokens=10)]
@@ -291,6 +293,26 @@ async def core_consumer_checks():
     exec(compile(ast.Module(body=[node],type_ignores=[]),str(source),'exec'),scope)
     base=dict(id='chatcmpl-synthetic',object='chat.completion.chunk',created=0,model='gpt-5.6-sol')
     def wire(data):return ('data: '+json.dumps(data)+'\n\n').encode()
+    # Match JSON-mode tool-only responses: duplicate roles produce ChatMessage(content=None).
+    for text in (None,'正文'):
+        tool=dict(id='call-only',type='function',function=dict(name='deter_tool',arguments='{"value":1}'))
+        completion=dict(base,choices=[dict(index=0,message=dict(role='assistant',content=text,tool_calls=[tool]),finish_reason='tool_calls')],
+                        usage=dict(prompt_tokens=7,completion_tokens=3,total_tokens=10))
+        data=(contract.chat_delta(base,{'role':'assistant'})+contract.chat_delta(base,{})
+              +contract.chat_sse(completion,role_sent=True)).encode()
+        async def structured_handler(request):
+            return httpx.Response(200,headers={'Content-Type':'text/event-stream'},content=data)
+        with httpx.Client(trust_env=False) as sync:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(structured_handler),trust_env=False) as client:
+                llm=ChatOpenAI(model='gpt-5.6-sol',api_key='synthetic',base_url='http://synthetic.invalid/v1',
+                              streaming=True,http_async_client=client,http_client=sync,http_socket_options=(),
+                              model_kwargs={'response_format':{'type':'json_object'}})
+                result=await llm.ainvoke('synthetic')
+                assert result.content==(text or '') and len(result.tool_calls)==1,result
+                assert result.tool_calls[0]['name']=='deter_tool' and result.tool_calls[0]['args']=={'value':1}
+                assert result.usage_metadata['total_tokens']==10,result
+        # Standalone serialization still includes exactly one role.
+        assert contract.chat_sse(completion).count('"role": "assistant"')==1
     for mode in ('astream','ainvoke'):
         requests=[]
         async def handler(request):

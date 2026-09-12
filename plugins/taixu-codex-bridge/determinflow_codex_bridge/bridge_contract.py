@@ -145,8 +145,8 @@ def chat_delta(completion,delta):
     return 'data: '+json.dumps(dict(base,choices=[{'index':0,'delta':delta,'finish_reason':None}]),ensure_ascii=False)+'\n\n'
 
 
-def chat_sse(completion,content_sent=False):
-    choice=completion['choices'][0];message=choice['message'];delta={'role':'assistant'}
+def chat_sse(completion,content_sent=False,role_sent=False):
+    choice=completion['choices'][0];message=choice['message'];delta={} if role_sent else {'role':'assistant'}
     if not content_sent and message.get('content') is not None:delta['content']=message['content']
     if message.get('tool_calls'):delta['tool_calls']=[dict(call,index=i) for i,call in enumerate(message['tool_calls'])]
     base={key:completion[key] for key in ('id','created','model')};base['object']='chat.completion.chunk'
