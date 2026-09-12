@@ -268,6 +268,9 @@ def failure_diagnostic(state,operation):
         outcome='completed';detail='Runtime 已完成生成，但桥接器未能交付有效结果；请先检查记录。'
     elif status in ('failed','interrupted'):
         outcome='runtime_'+status;detail='Runtime 已报告失败或中断；这不代表未消耗额度。'
+        error=terminal.get('error') or {}
+        if status=='failed' and isinstance(error,dict) and str(error.get('message','')).startswith('stream disconnected before completion:'):
+            detail='Runtime 报告响应流在完成前断开，未取得完整结果；无法据此判断断点或是否扣额。'
     else:
         outcome='unknown';detail='已尝试提交，远端结果未知；请勿直接重复提交。'
     return dict(code='codex_'+outcome,operation=operation,stage=stage,outcome=outcome,
@@ -378,8 +381,8 @@ async def run_chat(state,normalized,operation,on_text=None):
                 elif method=='turn/completed' and p.get('threadId')==tid and p['turn']['id']==uid:terminal=p['turn']
             if calls or terminal is not None:break
             await asyncio.sleep(.01)
-        if agent_id is not None:raise ValueError('Runtime assistant message is incomplete')
         if not calls and (terminal is None or terminal.get('status')!='completed' or terminal.get('error') is not None):raise RuntimeError('Runtime did not complete: '+str(terminal))
+        if agent_id is not None:raise ValueError('Runtime assistant message is incomplete')
     except BaseException as error:
         failure=error
     finally:

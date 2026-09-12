@@ -9,7 +9,7 @@ from . import bridge_native as native
 from .bridge_contract import validate_chat,chat_sse,chat_delta
 
 OWNER='taixu-codex-bridge'; PROVIDER='taixu_codex_limited'
-PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.12'
+PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.13'
 
 def build_request(params,provider,**clients):
     return {'client_kwargs':clients,'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}

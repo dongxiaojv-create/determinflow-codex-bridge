@@ -36,6 +36,12 @@ async def main():
                     if case=='cancel':raise asyncio.CancelledError()
                     terminal={'id':'u','status':'failed' if case=='failed' else 'completed'}
                     self.pending=[{'method':'turn/completed','params':{'threadId':'t','turn':terminal}}]
+                    if case=='stream_failed':
+                        terminal.update(status='failed',error={'message':'stream disconnected before completion: PRIVATE RAW ERROR'})
+                        self.pending[:0]=[
+                            {'method':'item/started','params':{'threadId':'t','turnId':'u','item':{'type':'agentMessage','id':'a'}}},
+                            {'method':'item/agentMessage/delta','params':{'threadId':'t','turnId':'u','itemId':'a','delta':'{"partial":'}},
+                        ]
                     return {'turn':{'id':'u'}}
                 raise AssertionError(method)
         source=ROOT/'plugins/taixu-codex-bridge/determinflow_codex_bridge/taixu_bridge.py'
@@ -46,6 +52,7 @@ async def main():
         exec(compile(ast.Module(body=[method],type_ignores=[]),str(source),'exec'),scope)
         for case,stage,outcome in [('setup','runtime_setup','not_submitted'),('auth','authentication','not_submitted'),
                                    ('unknown','turn_submission','unknown'),('failed','generation','runtime_failed'),
+                                   ('stream_failed','generation','runtime_failed'),
                                    ('invalid_json','result_validation','completed'),('cancel','turn_submission','unknown')]:
             state=dict(runtime_command=[],runtime_env={},lab=root,out=root,note=lambda *a,**k:None,
                        expected_runtime={'model_providers':{native.PROVIDER:{'requires_openai_auth':False}}})
@@ -64,6 +71,10 @@ async def main():
                 assert record['ended_at']>=record['started_at'] and record['duration_ms']>=0
                 assert (diagnostic['stage'],diagnostic['outcome'])==(stage,outcome),diagnostic
                 assert diagnostic['operation']==state['operation']
+                if case=='stream_failed':
+                    assert record['error_type']=='RuntimeError'
+                    assert '响应流在完成前断开' in diagnostic['message']
+                    assert not (root/'chat-completion.json').exists()
                 assert state['rpc'].closed and not bridge.active
                 assert state['done'].done()
         print('PASS: setup/auth, uncertain submission, terminal failure, invalid JSON, cancellation and HTTP diagnostics')
