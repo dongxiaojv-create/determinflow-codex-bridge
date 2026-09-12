@@ -35,7 +35,7 @@ def overrides(lab, native, manual_fourth=False):
     provider = config.pop('model_providers')['fixture']
     del provider['base_url']
     provider.update(name='Phase 0 existing native ChatGPT account', requires_openai_auth=True, supports_websockets=False)
-    config.update(model=MODEL, model_provider=PROVIDER, model_providers={PROVIDER:provider}, notify=[],
+    config.update(model=MODEL, model_provider=PROVIDER, model_providers={PROVIDER:provider}, service_tier='default', notify=[],
                   log_dir=str(lab/'log'), sqlite_home=str(lab/'sqlite'), history={'persistence':'none'},
                   analytics={'enabled':False}, feedback={'enabled':False},
                   otel={'exporter':'none','trace_exporter':'none','metrics_exporter':'none','log_user_prompt':False})

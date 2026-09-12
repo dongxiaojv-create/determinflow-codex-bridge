@@ -75,7 +75,10 @@ async def check(binary,case):
         with tempfile.TemporaryDirectory(prefix='native-streaming-') as temp:
             lab=Path(temp)
             for name in ('home','work','tmp','log','sqlite','out'):(lab/name).mkdir()
+            config_file=lab/'home/config.toml';config_before=b'service_tier = "priority"\n'
+            config_file.write_bytes(config_before)
             expected=native.overrides(lab,{},manual_fourth=True)
+            assert expected['service_tier']=='default', 'Bridge must override inherited priority in the child only'
             expected['model_providers'][native.PROVIDER].update(
                 base_url=f'http://127.0.0.1:{server.server_port}/v1',requires_openai_auth=False)
             command=[str(binary)]
@@ -137,6 +140,7 @@ async def check(binary,case):
                 if case in ('invalid_json','invalid_schema','mismatch','interleaved','cancel'):
                     assert not (state['out']/'chat-completion.json').exists(), 'Failure persisted a successful completion'
                 assert state['rpc'].proc.poll() is not None, 'Runtime survived request completion/cancellation'
+                assert config_file.read_bytes()==config_before, 'Bridge changed the user configuration'
                 assert len(requests)==1 and requests[0][1] is None, 'Unexpected retry or credentials'
             finally:
                 gate.set()
@@ -154,7 +158,7 @@ async def main():
     assert subprocess.check_output([str(binary),'--version'],text=True).strip()=='codex-cli 0.153.4'
     for case in ('text','json','invalid_json','schema','invalid_schema','mismatch','interleaved','cancel'):
         await check(binary,case)
-    print('PASS: pinned Runtime live deltas, message boundaries, JSON validation, reasoning isolation, confirmed cancellation; 8 local requests, 0 official model calls')
+    print('PASS: pinned Runtime live deltas, message boundaries, JSON validation, reasoning isolation, confirmed cancellation, child-only service tier override; 8 local requests, 0 official model calls')
 
 
 if __name__=='__main__':asyncio.run(main())
