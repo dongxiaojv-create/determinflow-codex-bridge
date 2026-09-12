@@ -2,7 +2,7 @@
 
 在 DeterminFlow 中使用**你自己登录的官方 Codex CLI 账户**。通过插件仓库安装，不需要 Codex 桌面应用，不提供共享账户或共享额度。
 
-**0.3.3 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
+**0.3.4 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
 
 工作流推理强度优先级：任务显式覆盖 → agent 自身设置 → Main 默认 → `high`。0.3.1 修复了 Main 强度覆盖 agent 设置的问题；已创建任务的冻结配置不追溯修改。
 
@@ -86,3 +86,9 @@ Runtime 检查使用临时 HOME 和本地合成服务，不读取个人登录、
 - 刷新不发送模型生成请求。生成期间仍可看本机统计，账户查询需等当前节点结束。
 
 可选页面检查（需已有 Playwright）：`node tests/check_usage_ui.cjs`；可用 `CHROME_PATH` 指定浏览器可执行文件。
+
+### 故障定位与发布检查
+
+失败消息包含阶段和请求编号。本机插件数据目录的 `attempts/<编号>.json` 保存相同诊断。`not_submitted` 表示尚未提交生成；`unknown` 表示尝试提交后无法确认结果，请先核查而不要直接重复提交。`runtime_failed` / `runtime_interrupted` 是 Runtime 报告的终态，不保证没有消耗额度；`completed` 表示生成结束但结果交付或校验失败。诊断不展示原始异常、提示词或凭据。
+
+[自动检查](https://github.com/dongxiaojv-create/determinflow-codex-bridge/actions/workflows/check.yml) 在每次推送和 PR 上运行固定 Runtime 的合成生成、JSON、工具交回以及离线错误/取消测试。发布前检查对应提交全部通过；绿色检查不替代第二台电脑和真实账户验收。

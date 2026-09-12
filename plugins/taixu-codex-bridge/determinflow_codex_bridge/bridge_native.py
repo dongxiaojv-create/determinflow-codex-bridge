@@ -257,6 +257,23 @@ class RPC:
 
 
 
+def failure_diagnostic(state,operation):
+    """Only report observed milestones; never infer remote acceptance from a timeout."""
+    stage=state.get('stage','runtime_setup')
+    terminal=(state.get('runtime_result') or {}).get('terminal') or {}
+    status=terminal.get('status')
+    if not state.get('turn_submission_attempted'):
+        outcome='not_submitted';detail='尚未提交生成请求，请检查本机 Runtime、登录和配置。'
+    elif status=='completed' and terminal.get('error') is None:
+        outcome='completed';detail='Runtime 已完成生成，但桥接器未能交付有效结果；请先检查记录。'
+    elif status in ('failed','interrupted'):
+        outcome='runtime_'+status;detail='Runtime 已报告失败或中断；这不代表未消耗额度。'
+    else:
+        outcome='unknown';detail='已尝试提交，远端结果未知；请勿直接重复提交。'
+    return dict(code='codex_'+outcome,operation=operation,stage=stage,outcome=outcome,
+                message=f'Codex 请求失败（阶段：{stage}，编号：{operation}）。{detail}')
+
+
 async def run_chat(state,normalized,operation):
     """One disposable Runtime per Deter request; Deter alone executes returned tools."""
     from .bridge_contract import checked_schema,require_json_object
@@ -289,6 +306,7 @@ async def run_chat(state,normalized,operation):
                 return
         if not any(c['id']==call_id for c in calls):calls.append({'id':call_id,'type':'function','function':{'name':fn['name'],'arguments':encoded}})
     try:
+        state['stage']='runtime_setup'
         await admission()
         rpc=RPC(state['runtime_command'],state['runtime_env'],state['lab']/'work',note,capture_diagnostics=True);state['rpc']=rpc
         await asyncio.to_thread(rpc.call,'initialize',{'clientInfo':{'name':'deter-codex-bridge','version':'1'},'capabilities':{'experimentalApi':True}})
@@ -297,9 +315,11 @@ async def run_chat(state,normalized,operation):
         expected=state.get('expected_runtime') or overrides(state['lab'],{},manual_fourth=True)
         check_config(effective,expected)
         if (await asyncio.to_thread(rpc.call,'remoteControl/status/read',None))['status']!='disabled':raise ValueError('Runtime remote control is not disabled')
+        state['stage']='authentication'
         account=await asyncio.to_thread(rpc.call,'account/read',{'refreshToken':False})
         if expected['model_providers'][PROVIDER]['requires_openai_auth'] and ((account.get('account') or {}).get('type')!='chatgpt' or account.get('requiresOpenaiAuth') is not True):raise ValueError('Native ChatGPT authentication is unavailable')
         await admission()
+        state['stage']='thread_setup'
         reply=await asyncio.to_thread(rpc.call,'thread/start',dict(model=normalized['model'],modelProvider=PROVIDER,allowProviderModelFallback=False,
             cwd=str(state['lab']/'work'),environments=[],sandbox='read-only',approvalPolicy='never',baseInstructions=normalized['base_instructions'],
             developerInstructions=('Response format: return exactly one valid JSON object as the final answer. No Markdown fences or text outside the object. Preserve the fields required by the task; this format requirement does not change tool calls.' if (normalized.get('response_format') or {}).get('type')=='json_object' else ''),personality='none',dynamicTools=normalized['tools'],ephemeral=True))
@@ -310,7 +330,9 @@ async def run_chat(state,normalized,operation):
         params=dict(threadId=tid,input=normalized['input'],model=normalized['model'],environments=[])
         if normalized['effort'] is not None:params['effort']=normalized['effort']
         if normalized['output_schema'] is not None:params['outputSchema']=normalized['output_schema']
+        state['stage']='turn_submission';state['turn_submission_attempted']=True
         uid=(await asyncio.to_thread(rpc.call,'turn/start',params))['turn']['id']
+        state['stage']='generation'
         while True:
             await admission()
             messages=rpc.pending[:];rpc.pending.clear()
@@ -366,6 +388,7 @@ async def run_chat(state,normalized,operation):
         if callable(state.get('save')):state['save'](**result,runtime_usage=usage)
         durable(state['out']/'runtime-result.json',result)
     if failure is not None:raise failure
+    state['stage']='result_validation'
     await admission()
     if not normalized['parallel_tool_calls']:calls=calls[:1]
     if normalized['required_tool'] and not calls:raise ValueError('Runtime did not satisfy requested tool_choice')

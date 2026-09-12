@@ -1,0 +1,41 @@
+name: Bridge release checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test dependencies
+        run: |
+          python -m pip install fastapi httpx uvicorn cryptography certifi jsonschema
+          npm install --prefix "$RUNNER_TEMP/browser" playwright@1.55.0
+          "$RUNNER_TEMP/browser/node_modules/.bin/playwright" install chromium
+      - name: Download pinned Runtime (hashes checked by tests)
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime"
+          npm pack @openai/codex@0.153.4-darwin-arm64 --pack-destination "$RUNNER_TEMP/runtime" --silent
+          tar -xzf "$RUNNER_TEMP/runtime/openai-codex-0.153.4-darwin-arm64.tgz" -C "$RUNNER_TEMP/runtime"
+          echo "CODEX_TEST_RUNTIME=$RUNNER_TEMP/runtime/package/vendor/aarch64-apple-darwin/bin/codex" >> "$GITHUB_ENV"
+      - name: Check final checkout without account credentials
+        env:
+          NODE_PATH: ${{ runner.temp }}/browser/node_modules
+        run: |
+          git diff --check
+          python tests/check_package.py
+          python tests/check_selection.py
+          python tests/check_usage.py
+          python tests/check_diagnostics.py
+          node tests/check_usage_ui.cjs
+          python tests/check_runtime.py
+          python tests/check_runtime.py --json-output
+          python tests/check_runtime.py --validation-feedback
+          python tests/check_runtime.py --validation-feedback --invalid-again

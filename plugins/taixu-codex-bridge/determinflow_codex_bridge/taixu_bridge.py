@@ -9,7 +9,7 @@ from . import bridge_native as native
 from .bridge_contract import validate_chat,chat_sse
 
 OWNER='taixu-codex-bridge'; PROVIDER='taixu_codex_limited'
-PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.3'
+PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.4'
 
 def build_request(params,provider):
     return {'client_kwargs':{},'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}
@@ -315,12 +315,14 @@ class Bridge:
                 return StreamingResponse(iter([chat_sse(completion)]),media_type='text/event-stream')
             return JSONResponse(completion)
         except asyncio.CancelledError:
-            save(state='CANCELLED_LOCALLY',remote_status='See Runtime terminal evidence')
+            save(state='CANCELLED_LOCALLY',diagnostic=native.failure_diagnostic(state,operation))
             raise
         except Exception as error:
-            save(state='FAILED_OR_UNKNOWN',error_type=type(error).__name__)
-            self.note('request_failed',operation=operation,error_type=type(error).__name__)
-            return JSONResponse({'error':{'message':'Codex Runtime 请求失败；请检查登录、网络和模型权限。','code':'codex_runtime_error'}},400)
+            diagnostic=native.failure_diagnostic(state,operation)
+            save(state='FAILED_OR_UNKNOWN',error_type=type(error).__name__,diagnostic=diagnostic)
+            self.note('request_failed',error_type=type(error).__name__,**diagnostic)
+            # Core and OpenAI clients do not automatically retry HTTP 400.
+            return JSONResponse({'error':diagnostic},400)
         finally:
             state['done'].set_result(None);self.active.pop(operation,None)
 
