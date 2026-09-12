@@ -50,7 +50,7 @@ async def main():
             state=dict(runtime_command=[],runtime_env={},lab=root,out=root,note=lambda *a,**k:None,
                        expected_runtime={'model_providers':{native.PROVIDER:{'requires_openai_auth':False}}})
             bridge=types.SimpleNamespace(authorize=lambda *a:None,enabled=True,ready=True,generation='fixture',
-                                         launch=lambda _:state,data=root,active={},note=lambda *a,**k:None)
+                                         launch=lambda _:state,data=root,active={},login_task=None,note=lambda *a,**k:None)
             with patch.object(native,'RPC',RPC),patch.object(native,'restore_tool_config',lambda x:x),patch.object(native,'check_config',lambda *a:None):
                 try:response=await scope['chat'](bridge,'fixture',Request())
                 except asyncio.CancelledError:assert case=='cancel'

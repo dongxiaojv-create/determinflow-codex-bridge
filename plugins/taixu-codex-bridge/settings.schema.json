@@ -4,12 +4,12 @@
     "codex_path": {
       "type": "string",
       "default": "",
-      "description": "官方 Codex CLI 0.153.4 可执行文件完整路径；留空检测常见安装目录。自定义安装请填写 command -v codex 的结果。"
+      "description": "留空由插件自动下载并校验官方 Codex 0.153.4 运行组件，无需安装 Node.js 或 Codex 应用。仅自定义运行组件时填写完整路径。"
     },
     "proxy": {
       "type": "string",
       "default": "",
-      "description": "仅用于 Codex Runtime 的 HTTP(S) 代理，例如 http://127.0.0.1:7890；留空直连。保存后重启 DeterminFlow。"
+      "description": "用于官方组件下载与 Codex Runtime 的 HTTP(S) 代理，例如 http://127.0.0.1:7890；留空直连。保存后重启 DeterminFlow。"
     }
   }
 }

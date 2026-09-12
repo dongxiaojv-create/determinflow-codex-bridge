@@ -84,7 +84,11 @@ def main():
             with TestClient(app) as client:
                 assert client.post('/api/taixu-codex-bridge/control/account').status_code==403
                 assert client.post('/api/taixu-codex-bridge/control/local-usage').status_code==403
+                assert client.post('/api/taixu-codex-bridge/control/login-start').status_code==403
+                assert client.post('/api/taixu-codex-bridge/control/login-start',headers={'X-Taixu-Bridge-Control':'1','Origin':'https://evil.test'}).status_code==403
+                assert client.post('/api/taixu-codex-bridge/control/login-status',headers={'X-Taixu-Bridge-Control':'1'}).json()['phase']=='idle'
                 bridge.active={'synthetic':{}}
+                assert client.post('/api/taixu-codex-bridge/control/login-start',headers={'X-Taixu-Bridge-Control':'1'}).status_code==409
                 res=client.post('/api/taixu-codex-bridge/control/local-usage',headers={'X-Taixu-Bridge-Control':'1'})
                 assert res.status_code==200 and res.json()['totals']['requests']==0
                 assert client.post('/api/taixu-codex-bridge/control/usage',headers={'X-Taixu-Bridge-Control':'1'}).status_code==409

@@ -21,10 +21,15 @@ async def check(temp):
     contributions=ExtensionContributions();bridge=Bridge()
     bridge.register(ExtensionRegistrar(manifest,contributions))
     data=temp/'data_dir/plugins/data/taixu-codex-bridge'
+    (data/'login-prompted').touch()  # Host checks never initiate an interactive login.
     services={'plugin_dir':PLUGIN,'plugin_data_dir':data,'plugin_config':{'codex_path':os.environ['CODEX_TEST_RUNTIME'],'proxy':''}}
+    from src.extension_host.lifecycle import load_extension_lifecycle,run_extension_lifecycle
+    config_file=temp/'plugin-config.json';config_file.write_text(__import__('json').dumps(services['plugin_config']))
+    await run_extension_lifecycle(load_extension_lifecycle(PLUGIN/'extension.toml'),owner='taixu-codex-bridge',
+        plugin_dir=PLUGIN,config_file=config_file,data_dir=data,base_dir=temp,plugin_revision='fixture',python_executable=sys.executable)
     await bridge.start(types.SimpleNamespace(get_service=services.get))
     try:
-        assert bridge.ready
+        assert bridge.ready and len(bridge.catalog)>1 and not bridge.restart_required
         import ssl
         context=ssl.create_default_context(cafile=str(data/'tls/trust.pem'))
         async with httpx.AsyncClient(verify=context,trust_env=False) as client:

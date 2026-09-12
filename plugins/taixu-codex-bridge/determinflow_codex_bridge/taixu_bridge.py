@@ -9,7 +9,7 @@ from . import bridge_native as native
 from .bridge_contract import validate_chat,chat_sse
 
 OWNER='taixu-codex-bridge'; PROVIDER='taixu_codex_limited'
-PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.4'
+PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.5'
 
 def build_request(params,provider):
     return {'client_kwargs':{},'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}
@@ -71,6 +71,7 @@ class Bridge:
         self.enabled=False; self.ready=False; self.error=None; self.active={}
         self.management=asyncio.Lock(); self.restart_required=False
         self.catalog=[]; self.generation=None
+        self.login_task=None; self.onboarding={'phase':'idle','message':'可以在此登录 ChatGPT 账户。'}
 
     def register(self,registrar):
         self.manifest=registrar.manifest
@@ -122,6 +123,7 @@ class Bridge:
         (self.data/'attempts').mkdir(exist_ok=True,mode=0o700)
         for name in ('work','tmp','log','sqlite','outputs'):(self.data/name).mkdir(exist_ok=True,mode=0o700)
         self.catalog=json.loads((self.data/'catalog.json').read_text()) if (self.data/'catalog.json').exists() else []
+        register_adapter(self.catalog)
         self.enabled=not (self.data/'stopped').exists(); self.key=uuid.uuid4().hex; self.generation=uuid.uuid4().hex
         import uvicorn
         tls=Path(self.config['tls_dir'])
@@ -143,6 +145,10 @@ class Bridge:
             await self.stop()
             raise
         self.ready=True
+        if self.enabled and not (self.data/'login-prompted').exists():
+            (self.data/'login-prompted').touch(mode=0o600)
+            from .onboarding import login
+            self.login_task=asyncio.create_task(login(self))
 
     async def api(self,method,path,**kwargs):
         async with httpx.AsyncClient(base_url=self.config['core_url'],trust_env=False,timeout=2) as client:
@@ -199,9 +205,9 @@ class Bridge:
 
     def launch(self,operation):
         from .local_setup import find_runtime, proxy_environment
-        binary=find_runtime(self.config.get('codex_path',''))
+        binary=find_runtime(self.config.get('codex_path') or str(self.data/'runtime-0.153.4/codex'))
         home=Path.home(); codex=Path(os.environ.get('CODEX_HOME') or home/'.codex').expanduser()
-        if not codex.is_dir():raise ValueError('尚未初始化 Codex 登录，请先在终端运行 codex login。')
+        if not codex.is_dir():raise ValueError('尚未登录，请打开插件页面并点击登录 ChatGPT。')
         config=tomllib.loads((codex/'config.toml').read_text()) if (codex/'config.toml').exists() else {}
         if config.get('forced_login_method') is not None or native.PROVIDER in config.get('model_providers',{}):
             raise ValueError('Native authentication/provider configuration conflicts with reviewed path')
@@ -250,9 +256,26 @@ class Bridge:
         self.authorize(request)
         # Non-browser custom header avoids ambient cross-origin POSTs; the host's existing local API is the trust boundary.
         if request.headers.get('x-taixu-bridge-control')!='1': raise HTTPException(403,'Use bridge.py management command')
+        if action.startswith('login-') and request.headers.get('origin') not in (None,str(request.base_url).rstrip('/')):
+            raise HTTPException(403,'Login controls require the plugin page origin')
+        if action=='login-status':return self.onboarding
+        if action=='login-cancel':
+            if self.login_task and not self.login_task.done():
+                self.login_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):await self.login_task
+            return self.onboarding
+        if action=='login-start':
+            if self.active:raise HTTPException(409,'请等待当前模型请求完成后再登录。')
+            if not self.enabled or not self.ready:raise HTTPException(409,'请先启用插件。')
+            if self.login_task and not self.login_task.done():return self.onboarding
+            from .onboarding import login
+            self.onboarding={'phase':'checking','message':'正在打开官方登录…'}
+            self.login_task=asyncio.create_task(login(self,force=True))
+            return self.onboarding
         if action=='local-usage':
             from .usage import local_usage
             return await asyncio.to_thread(local_usage,self.data)
+        if self.login_task and not self.login_task.done():raise HTTPException(409,'正在登录，请完成或取消登录后再操作。')
         async with self.management:
             if action=='stop':
                 self.enabled=False; (self.data/'stopped').touch(mode=0o600)
@@ -282,6 +305,9 @@ class Bridge:
 
     async def stop(self):
         self.enabled=False; self.ready=False
+        if self.login_task and not self.login_task.done():
+            self.login_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):await self.login_task
         await self.drain()
         if hasattr(self,'server'):
             self.server.should_exit=True
@@ -291,6 +317,8 @@ class Bridge:
     async def chat(self,generation:str,request:Request):
         self.authorize(request,generation)
         if not self.enabled or not self.ready:raise HTTPException(401,'Codex Bridge is stopped or unavailable')
+        if self.login_task and not self.login_task.done():
+            return JSONResponse({'error':{'message':'正在登录，请完成或取消登录后再发送消息。','code':'codex_login_pending'}},400)
         raw=await request.body()
         if len(raw)>8388608:raise HTTPException(413,'Request exceeds 8 MiB')
         try:body=validate_chat(json.loads(raw))
