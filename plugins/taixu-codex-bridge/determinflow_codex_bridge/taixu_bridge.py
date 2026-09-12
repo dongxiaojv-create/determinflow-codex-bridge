@@ -9,7 +9,7 @@ from . import bridge_native as native
 from .bridge_contract import validate_chat,chat_sse,chat_delta
 
 OWNER='taixu-codex-bridge'; PROVIDER='taixu_codex_limited'
-PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.9'
+PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.10'
 
 def build_request(params,provider,**clients):
     return {'client_kwargs':clients,'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}
@@ -346,10 +346,16 @@ class Bridge:
         def save(**values):
             old=json.loads(slot.read_text()) if slot.exists() else {}
             old.update(values);native.durable(slot,old)
-        save(state='STARTED',operation=operation,model=body['model'],generation=self.generation,started_at=time.time())
+        started=time.monotonic()
+        save(state='STARTED',operation=operation,model=body['model'],generation=self.generation,started_at=time.time(),
+             version=VERSION,effort=body['effort'],usage_scope='unknown')
         state.update(operation=operation,model=body['model'],request=request,save=save,created=int(time.time()),
                      enabled=lambda:self.enabled and self.ready,done=asyncio.get_running_loop().create_future())
         self.active[operation]=state
+        def finish():
+            try:save(ended_at=time.time(),duration_ms=max(0,round((time.monotonic()-started)*1000)))
+            finally:
+                state['done'].set_result(None);self.active.pop(operation,None)
         chunks=asyncio.Queue(32) if body['stream'] else None
         async def generate():
             state['task']=asyncio.current_task()
@@ -370,7 +376,7 @@ class Bridge:
                 # Core and OpenAI clients do not automatically retry HTTP 400.
                 return JSONResponse({'error':diagnostic},400)
             finally:
-                state['done'].set_result(None);self.active.pop(operation,None)
+                finish()
         if chunks is None:return await generate()
         producer=asyncio.create_task(generate())
         state['task']=producer
@@ -387,8 +393,8 @@ class Bridge:
             if not producer.done() and not producer.cancelling() and not state.get('closing_runtime'):producer.cancel()
             with contextlib.suppress(asyncio.CancelledError):await asyncio.shield(producer)
             if producer.cancelled() and not state['done'].done():
-                save(state='CANCELLED_LOCALLY',diagnostic=native.failure_diagnostic(state,operation))
-                state['done'].set_result(None);self.active.pop(operation,None)
+                try:save(state='CANCELLED_LOCALLY',diagnostic=native.failure_diagnostic(state,operation))
+                finally:finish()
         try:first=await next_chunk()
         except BaseException:
             await cancel();raise

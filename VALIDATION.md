@@ -1,8 +1,12 @@
-# 0.3.9 发布验证
+# 0.3.10 发布验证
 
 日期：2026-09-12。此版本为 macOS Apple Silicon 预览版。
 
 ## 已验证
+
+- 0.3.10：在独立 Runtime 线程结束后读取最后一条匹配 thread/turn 的累计用量，替代仅记录最后一次生成。合成服务每次报告 13 token，工具纠参的两次生成应记录 26；历史注入后的新线程仍只记录其本次 13，不重复累计旧线程。只提供 last 时标注 last_only，无通知时为 unknown。
+- `tests/check_streaming.py`：在现有取消回收检查中覆盖中断握手期间晚到的累计通知、重复通知不叠加、其他 thread/turn 过滤、last_only/unknown，以及成功/失败/取消的调用元数据；首次运行前取消且取消记录写入失败时，仍清理运行状态。固定 Runtime 四种工具模式与八个流式场景通过，全程使用临时 HOME 和本地合成服务。
+- 近期调用明细复用现有 attempts 记录，仅返回白名单字段，最多展示 50 条；旧字段不猜测、不改写。版本、强度、结束时间及耗时从新调用起记录；旧版用量可能漏计纠参，页面明确标注。
 
 - 0.3.9：通过 `[agents] enabled=false` 关闭固定 Runtime 默认注入的额外多代理工具和说明；原有 `features.multi_agent=false` 不足以关闭这部分。Deter/Bishu 继续负责 agent 与业务工具执行。
 - 固定 Runtime + 空 HOME + 本地合成服务的同场景对比：去除随机 item ID 后，上行 input JSON 的字符数分别为无工具短请求 13,797 → 5,512、3 工具短请求 14,277 → 5,992、12 轮长历史及 3 工具 64,453 → 56,168；每次固定减少 8,285 字符。完整请求体减少 8,381 字节。这是序列化输入规模，不是官方 token 或额度节省比例；长上下文中的相对降幅更小。
@@ -52,7 +56,8 @@
 ## 未验证
 
 - 第二台真实电脑上的 GUI 仓库安装、浏览器登录及真实生成。
-- Windows、Linux、Intel Mac；其他 Core 与 Runtime 版本。
+- Windows：当前版本不支持。`tests/check_platform.py` 在 macOS 上模拟 Windows AMD64/arm64 和缺少 fcntl：运行组件查找器/安装器拒绝平台，真实生命周期和插件模块因 fcntl 无法导入，TLS 文件锁同样不可用。下载包、二进制名称及 SHA256 仅为 Darwin arm64；POSIX 环境变量和目录持久化也需要移植。模拟检查的 unsupported_expected 表示如实验证了限制，不能当成 Windows 启动成功；没有运行 Windows 操作系统或官方 Windows Runtime。
+- Linux、Intel Mac；其他 Core 与 Runtime 版本。
 - 当前目录中每个模型的实际账户权限、服务端行为及额度。
 
 不要把本地测试通过等同于上述跨机或远端验收通过。

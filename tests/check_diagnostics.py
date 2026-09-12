@@ -13,7 +13,7 @@ async def main():
         root=Path(tmp);(root/'attempts').mkdir()
         class Request:
             async def is_disconnected(self):return False
-            async def body(self):return json.dumps({'model':'gpt-5.6-sol','messages':[{'role':'user','content':'fixture'}],'response_format':{'type':'json_object'}}).encode()
+            async def body(self):return json.dumps({'model':'gpt-5.6-sol','reasoning_effort':'low','messages':[{'role':'user','content':'fixture'}],'response_format':{'type':'json_object'}}).encode()
         class RPC:
             def __init__(self,*args,**kwargs):
                 self.pending=[];self.inbox=queue.Queue();self.events=[];self.closed=False
@@ -42,7 +42,7 @@ async def main():
         bridge_ast=next(n for n in ast.parse(source.read_text()).body if isinstance(n,ast.ClassDef) and n.name=='Bridge')
         method=next(n for n in bridge_ast.body if getattr(n,'name',None)=='chat')
         scope=dict(asyncio=asyncio,json=json,uuid=uuid,time=__import__('time'),Request=Request,native=native,
-                   validate_chat=validate_chat,JSONResponse=JSONResponse,StreamingResponse=StreamingResponse,chat_sse=chat_sse)
+                   validate_chat=validate_chat,JSONResponse=JSONResponse,StreamingResponse=StreamingResponse,chat_sse=chat_sse,VERSION='fixture')
         exec(compile(ast.Module(body=[method],type_ignores=[]),str(source),'exec'),scope)
         for case,stage,outcome in [('setup','runtime_setup','not_submitted'),('auth','authentication','not_submitted'),
                                    ('unknown','turn_submission','unknown'),('failed','generation','runtime_failed'),
@@ -60,6 +60,8 @@ async def main():
                     assert 'PRIVATE RAW ERROR' not in diagnostic['message']
                 record=json.loads((root/'attempts'/(state['operation']+'.json')).read_text())
                 diagnostic=record['diagnostic']
+                assert record['version']=='fixture' and record['effort']=='low'
+                assert record['ended_at']>=record['started_at'] and record['duration_ms']>=0
                 assert (diagnostic['stage'],diagnostic['outcome'])==(stage,outcome),diagnostic
                 assert diagnostic['operation']==state['operation']
                 assert state['rpc'].closed and not bridge.active

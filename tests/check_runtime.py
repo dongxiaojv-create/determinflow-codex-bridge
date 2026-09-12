@@ -56,7 +56,7 @@ async def main():
             states.append(s);return s,operation
         tools=[{'type':'function','function':{'name':'shell','description':'A Deter-owned synthetic tool; Runtime must not execute it','strict':True,'parameters':{'type':'object','properties':{'value':{'type':'string'}},'required':['value'],'additionalProperties':False}}}]
         messages=[{'role':'system','content':'SYNTHETIC SYSTEM PRESERVED'}, {'role':'developer','content':'SYNTHETIC DEVELOPER PRESERVED'}, {'role':'user','content':'SYNTHETIC CALL THE DETER TOOL'}]
-        body=dict(model='gpt-5.6-sol',reasoning_effort='medium',stream=True,messages=messages,tools=tools)
+        body=dict(model='gpt-5.6-sol',reasoning_effort='medium',stream=True,stream_options={'include_usage':True},messages=messages,tools=tools)
         if json_mode:body['response_format']={'type':'json_object'}
         def check_requests():
             for record in records:
@@ -79,10 +79,13 @@ async def main():
             else:raise AssertionError('Repeated invalid arguments passed')
             assert len(records)==2 and s['runtime_result']['validation_feedback_count']==1
             assert s['rpc'].proc.poll() is not None
+            assert s['runtime_result']['usage']['totalTokens']==26 and s['runtime_result']['usage_scope']=='thread_total'
             check_requests()
             print('PASS: repeated invalid arguments stop after one feedback; no business tool handoff')
             server.shutdown();server.server_close();return
         first=await asyncio.wait_for(native.run_chat(s,validate_chat(body),op),15)
+        assert first['usage']['total_tokens']==13*(1+int(repair)), 'Correction round usage was omitted'
+        assert s['runtime_result']['usage_scope']=='thread_total'
         if repair:
             assert s['runtime_result']['validation_feedback_count']==1
             assert 'NOT executed' in json.dumps(records[1]['input'])
@@ -95,6 +98,7 @@ async def main():
         s,op=state();second=await asyncio.wait_for(native.run_chat(s,follow,op),15)
         assert second['choices'][0]['message']['content']==answer
         assert second['choices'][0]['finish_reason']=='stop' and s['rpc'].proc.poll() is not None
+        assert second['usage']['total_tokens']==13 and s['runtime_result']['usage_scope']=='thread_total', 'Injected history must not double-count a previous Runtime thread'
         assert len(records)==(3 if repair else 2),len(records)
         check_requests()
         if json_mode:

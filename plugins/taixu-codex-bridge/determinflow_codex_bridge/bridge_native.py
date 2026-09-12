@@ -279,7 +279,7 @@ async def run_chat(state,normalized,operation,on_text=None):
     from .bridge_contract import checked_schema,require_json_object
     from jsonschema.exceptions import ValidationError
     note=state['note'];rpc=None;tid=uid=None;terminal=None;failure=None;calls=[];items=[];usage=None;interrupted=False
-    validation_feedback_count=0
+    validation_feedback_count=0;usage_scope='unknown'
     live_text=on_text if (normalized.get('response_format') or {}).get('type','text')=='text' else None
     agent_id=None;sent_text=''
     async def admission():
@@ -372,7 +372,6 @@ async def run_chat(state,normalized,operation,on_text=None):
                 elif method=='item/agentMessage/delta':
                     if p.get('threadId')!=tid or p.get('turnId')!=uid or p.get('itemId')!=agent_id or agent_id is None:raise ValueError('Runtime text delta identity mismatch')
                     if p['delta']!='':await emit_text(p['delta'])
-                elif method=='thread/tokenUsage/updated' and p.get('threadId')==tid and p.get('turnId')==uid:usage=p['tokenUsage'].get('last')
                 elif method=='turn/completed' and p.get('threadId')==tid and p['turn']['id']==uid:terminal=p['turn']
             if calls or terminal is not None:break
             await asyncio.sleep(.01)
@@ -397,6 +396,15 @@ async def run_chat(state,normalized,operation,on_text=None):
                     interrupted=bool(ack and terminal and terminal.get('status')=='interrupted')
                 except Exception as error:note('interrupt_unconfirmed',error_type=type(error).__name__)
             await asyncio.shield(asyncio.to_thread(rpc.close))
+            # One fresh thread per request: its final total includes correction rounds.
+            # Read after shutdown to include usage received during the interrupt handshake.
+            for event in reversed(rpc.events):
+                p=event.get('params',{})
+                if event.get('method')=='thread/tokenUsage/updated' and p.get('threadId')==tid and p.get('turnId')==uid:
+                    token_usage=p.get('tokenUsage') or {}
+                    if isinstance(token_usage.get('total'),dict):usage=token_usage['total'];usage_scope='thread_total'
+                    elif isinstance(token_usage.get('last'),dict):usage=token_usage['last'];usage_scope='last_only'
+                    break
             # A parallel tool proposal may arrive during the bounded interrupt handshake.
             remaining=rpc.pending[:]
             while True:
@@ -408,7 +416,7 @@ async def run_chat(state,normalized,operation,on_text=None):
                         if message.get('method')=='item/tool/call':tool_call(message)
                 except Exception as error:failure=error
             if calls and not interrupted and failure is None:failure=RuntimeError('Tool handoff cancellation was not confirmed; Runtime closed, remote state unknown')
-        result=dict(operation=operation,thread_id=tid,turn_id=uid,terminal=terminal,interrupted=interrupted,state=('UNKNOWN' if terminal is None else 'FAILED') if failure else 'TOOL_HANDOFF' if calls else 'COMPLETED',usage=usage,error_type=type(failure).__name__ if failure else None,validation_feedback_count=validation_feedback_count)
+        result=dict(operation=operation,thread_id=tid,turn_id=uid,terminal=terminal,interrupted=interrupted,state=('UNKNOWN' if terminal is None else 'FAILED') if failure else 'TOOL_HANDOFF' if calls else 'COMPLETED',usage=usage,usage_scope=usage_scope,error_type=type(failure).__name__ if failure else None,validation_feedback_count=validation_feedback_count)
         state['runtime_result']=result
         if callable(state.get('save')):state['save'](**result,runtime_usage=usage)
         durable(state['out']/'runtime-result.json',result)

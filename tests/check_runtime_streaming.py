@@ -113,6 +113,7 @@ async def check(binary,case):
                     assert not completed.is_set(), 'Fixture completed before interruption was confirmed'
                     assert state['runtime_result']['interrupted'] is True
                     assert state['runtime_result']['terminal']['status']=='interrupted'
+                    assert state['runtime_result']['usage'] is None and state['runtime_result']['usage_scope']=='unknown'
                 elif case in ('invalid_json','invalid_schema','mismatch','interleaved'):
                     try:await asyncio.wait_for(task,15)
                     except ValueError as error:
@@ -129,6 +130,7 @@ async def check(binary,case):
                     assert result['choices'][0]['message']['content']==answer
                     assert result['choices'][0]['finish_reason']=='stop'
                     assert result['usage']['total_tokens']==13
+                    assert state['runtime_result']['usage_scope']=='thread_total'
                     if case=='text':
                         assert ''.join(chunks)==answer and chunks.count('\n')==1, chunks
                         assert any(e.get('params',{}).get('item',{}).get('type')=='reasoning'

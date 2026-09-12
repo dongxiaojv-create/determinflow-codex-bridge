@@ -28,7 +28,7 @@ class Run:
         self.mode=mode;self.gate=asyncio.Event();self.closed=asyncio.Event();self.calls=0
 
     async def __call__(self,state,body,operation,on_text=None):
-        self.calls+=1;self.state=state
+        self.calls+=1;self.state=state;self.effort=body.get('effort')
         state.update(stage='runtime_setup')
         try:
             if self.mode=='before_error':raise ValueError('PRIVATE RAW ERROR')
@@ -66,7 +66,10 @@ async def check_clean(bridge,run,root):
     async with asyncio.timeout(3):
         while bridge.active:await asyncio.sleep(.01)
     assert run.state['done'].done() and run.calls==1
-    return json.loads((root/'attempts'/(run.state['operation']+'.json')).read_text())
+    record=json.loads((root/'attempts'/(run.state['operation']+'.json')).read_text())
+    assert record['version']=='fixture' and record['effort']==run.effort
+    assert record['ended_at']>=record['started_at'] and record['duration_ms']>=0
+    return record
 
 
 async def http_checks():
@@ -165,15 +168,25 @@ async def http_checks():
                         assert run.state['task'].done(),mode
                         assert record['state']==('CANCELLED_LOCALLY' if mode=='queue_cancel' else 'FAILED_OR_UNKNOWN')
                         await response.body_iterator.aclose()
-                state={};run=Run()
-                def cancel_before_start(_):
-                    asyncio.get_running_loop().call_soon(lambda:state['task'].cancel())
-                    return state
-                with patch.object(bridge,'launch',cancel_before_start),patch.object(native,'run_chat',run):
-                    try:await bridge.chat('fixture',UnreadRequest())
-                    except asyncio.CancelledError:pass
-                    else:raise AssertionError('Cancelled producer unexpectedly returned success')
-                    assert run.calls==0 and not bridge.active and state['done'].done()
+                original_durable=native.durable
+                for disk_error in (False,True):
+                    state={};run=Run()
+                    def cancel_before_start(_):
+                        asyncio.get_running_loop().call_soon(lambda:state['task'].cancel())
+                        return state
+                    def save_cancel(path,value):
+                        if disk_error and value.get('state')=='CANCELLED_LOCALLY':raise OSError('synthetic cancellation write failure')
+                        return original_durable(path,value)
+                    with patch.object(bridge,'launch',cancel_before_start),patch.object(native,'run_chat',run),patch.object(native,'durable',save_cancel):
+                        try:await bridge.chat('fixture',UnreadRequest())
+                        except (asyncio.CancelledError,OSError) as error:
+                            assert isinstance(error,OSError)==disk_error
+                            if disk_error:assert str(error)=='synthetic cancellation write failure'
+                        else:raise AssertionError('Cancelled producer unexpectedly returned success')
+                        assert run.calls==0 and state['task'].cancelled() and not bridge.active and state['done'].done()
+                        record=json.loads((root/'attempts'/(state['operation']+'.json')).read_text())
+                        assert record['version']=='fixture' and record['effort'] is None
+                        assert record['ended_at']>=record['started_at'] and record['duration_ms']>=0
         finally:
             server.should_exit=True
             await asyncio.wait_for(serving,5)
@@ -184,7 +197,8 @@ async def http_checks():
 async def runtime_cleanup_checks():
     with tempfile.TemporaryDirectory() as tmp:
         root=Path(tmp);normalized=contract.validate_chat(dict(model='gpt-5.6-sol',messages=[dict(role='user',content='synthetic')],stream=True))
-        for mode in ('initialization','generation'):
+        for mode in ('initialization','generation','last_only','wrong_identity'):
+            generation=mode!='initialization'
             entered=threading.Event();release=threading.Event();interrupting=threading.Event()
             closing=threading.Event();close_release=threading.Event();ready=asyncio.Event()
             class RPC:
@@ -205,12 +219,23 @@ async def runtime_cleanup_checks():
                     if message.get('method')=='turn/interrupt':interrupting.set()
                 def wait(self,*a):
                     assert release.wait(3);self.waits+=1
+                    if self.waits==1:
+                        last=dict(inputTokens=10,outputTokens=3,totalTokens=13)
+                        token_usage={'last':last}
+                        if mode!='last_only':token_usage['total']=dict(inputTokens=20,outputTokens=6,totalTokens=26)
+                        self.usage_event={'method':'thread/tokenUsage/updated','params':{'threadId':'other' if mode=='wrong_identity' else 'thread','turnId':'turn','tokenUsage':token_usage}}
+                        # The real reader captures the event before wait leaves it pending.
+                        self.events.append(self.usage_event);self.pending.append(self.usage_event)
                     return {'id':'bridge-interrupt','result':{}} if self.waits==1 else {'method':'turn/completed','params':{'threadId':'thread','turn':{'id':'turn','status':'interrupted'}}}
                 def close(self):
                     closing.set()
-                    if mode=='generation':assert close_release.wait(3)
+                    if generation:
+                        assert close_release.wait(3)
+                        self.events.append(self.usage_event)  # A duplicate notification must not be summed.
+                        self.events.append({'method':'thread/tokenUsage/updated','params':{'threadId':'thread','turnId':'other','tokenUsage':{'total':{'totalTokens':999}}}})
                     self.closed=True;release.set()
-            bridge=bridge_class()();state=dict(runtime_command=[],runtime_env={},lab=root,out=root,note=lambda *a,**kw:None,
+            saved={}
+            bridge=bridge_class()();state=dict(runtime_command=[],runtime_env={},lab=root,out=root,note=lambda *a,**kw:None,save=lambda **values:saved.update(values),
                 request=types.SimpleNamespace(is_disconnected=lambda:asyncio.sleep(0,result=False)),enabled=lambda:True,
                 expected_runtime={'model_providers':{native.PROVIDER:{'requires_openai_auth':False}}},done=asyncio.get_running_loop().create_future())
             bridge.active={'synthetic':state}
@@ -222,9 +247,9 @@ async def runtime_cleanup_checks():
                 task=asyncio.create_task(generate());state['task']=task;drains=[]
                 try:
                     assert await asyncio.to_thread(entered.wait,3)
-                    if mode=='generation':await asyncio.wait_for(ready.wait(),3)
+                    if generation:await asyncio.wait_for(ready.wait(),3)
                     task.cancel()
-                    if mode=='generation':
+                    if generation:
                         assert await asyncio.to_thread(interrupting.wait,3)
                         drains.append(asyncio.create_task(bridge.drain()));await asyncio.sleep(.01)
                         assert task.cancelling()==1 and not task.done()
@@ -236,11 +261,15 @@ async def runtime_cleanup_checks():
                     await asyncio.gather(*drains)
                     assert state['rpc'].closed and not bridge.active and state['done'].done()
                     assert state['runtime_result']['error_type']=='CancelledError'
-                    assert state['runtime_result']['interrupted']==(mode=='generation')
+                    assert state['runtime_result']['interrupted']==generation
+                    result=state['runtime_result']
+                    assert result['usage_scope']==('thread_total' if mode=='generation' else 'last_only' if mode=='last_only' else 'unknown')
+                    assert result['usage']==(dict(inputTokens=20,outputTokens=6,totalTokens=26) if mode=='generation' else dict(inputTokens=10,outputTokens=3,totalTokens=13) if mode=='last_only' else None)
+                    assert saved['usage_scope']==result['usage_scope'] and saved['runtime_usage']==result['usage']
                 finally:
                     release.set();close_release.set()
                     with contextlib.suppress(asyncio.CancelledError):await task
-    print('PASS: native initialization cancellation and repeated drain preserve interrupt/close cleanup without task leaks')
+    print('PASS: native cancellation and repeated drain preserve cleanup; late/duplicate usage, last-only fallback and identity filtering')
 
 
 async def core_consumer_checks():

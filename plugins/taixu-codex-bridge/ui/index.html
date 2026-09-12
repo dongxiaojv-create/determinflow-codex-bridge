@@ -21,6 +21,10 @@
 <p>统计本插件保留的全部调用记录，可能包含此前登录账户的调用。缓存输入包含在输入中，推理包含在输出中，不要重复相加。缺失记录不算零；这不是官方扣费账单。</p>
 <p id="coverage" role="status" aria-live="polite">尚未读取。</p>
 <div class="scroll"><table><thead><tr><th>模型</th><th>有记录 / 调用</th><th>输入</th><th>输出</th><th>总 Token</th><th>缓存输入</th><th>推理</th></tr></thead><tbody id="tokens"></tbody></table></div>
+<h2>近期调用</h2>
+<p id="recent-coverage">尚未读取。</p>
+<p>仅记录本机桥接调用；历史记录缺少的版本、强度和用量范围显示为未知。失败或中断时的已知 Token 可能不完整。</p>
+<div class="scroll"><table aria-label="近期桥接调用"><thead><tr><th>时间</th><th>模型 / 强度 / 版本</th><th>状态</th><th>输入 / 输出 / 总 Token</th><th>缓存 / 推理</th><th>纠参次数</th><th>用量范围</th></tr></thead><tbody id="recent"></tbody></table></div>
 <script>
 const result=document.getElementById('result');
 async function check(action){
@@ -61,7 +65,7 @@ function renderLimits(data){
 }
 function renderTokens(data){
  const t=data.totals;
- coverage.textContent='本机已知总 Token：'+(t.known?number(t.total):'未知')+'；有用量记录 '+t.known+' / '+t.requests+' 次，缺失 '+(t.requests-t.known)+' 次，无法读取 '+data.unreadable+' 份。'+(t.known<t.requests||data.unreadable?' 当前仅为已知部分合计。':'');
+ coverage.textContent='本机已知总 Token：'+(t.known?number(t.total):'未知')+'；有用量记录 '+t.known+' / '+t.requests+' 次，缺失 '+(t.requests-t.known)+' 次，无法读取 '+data.unreadable+' 份。'+(t.known<t.requests||data.unreadable?' 当前仅为已知部分合计。':'')+(data.legacy_usage_requests?' '+number(data.legacy_usage_requests)+' 次旧记录的用量范围未知，可能漏计纠参回合。':'');
  const body=document.getElementById('tokens');body.replaceChildren();
  for(const row of data.models){
   const tr=document.createElement('tr');
@@ -71,13 +75,25 @@ function renderTokens(data){
   }
   body.append(tr);
  }
+ const recent=document.getElementById('recent');recent.replaceChildren();
+ const rows=data.recent||[],time=v=>typeof v==='number'&&Number.isFinite(v)&&Number.isFinite(new Date(v*1000).getTime())?new Date(v*1000).toLocaleString():'未知';
+ document.getElementById('recent-coverage').textContent='显示 '+rows.length+' 次；按开始时间倒序，最多 '+number(data.recent_limit)+' 次，无时间记录排在最后。';
+ for(const row of rows){
+  const tr=document.createElement('tr');tr.title='调用 ID：'+row.operation+'；结束：'+time(row.ended_at)+'；耗时：'+number(row.duration_ms)+' ms';
+  const tokens=row.tokens||{},state={STARTED:'进行中',COMPLETED:'已完成',TOOL_HANDOFF:'工具交接',FAILED:'失败',UNKNOWN:'未知',CANCELLED_LOCALLY:'本地中断',FAILED_OR_UNKNOWN:'失败或未知'}[row.state]||row.state||'未知';
+  const scope={thread_total:'累计已报告用量',last_only:'仅末次生成（可能不完整）',unknown:'未收到用量报告',legacy:'旧记录：范围未知'}[row.usage_scope]||'未知';
+  for(const value of [time(row.started_at)+'；耗时 '+number(row.duration_ms)+' ms',[row.model,row.effort,row.version].map(v=>v??'未知').join(' / '),state,['input','output','total'].map(k=>number(tokens[k])).join(' / '),['cached','reasoning'].map(k=>number(tokens[k])).join(' / '),number(row.validation_feedback_count),scope]){
+   const td=document.createElement('td');td.textContent=value;tr.append(td);
+  }
+  recent.append(tr);
+ }
 }
 async function refreshUsage(){
  const button=document.getElementById('usage');button.disabled=true;
- limits.textContent='正在读取账户额度…';coverage.textContent='正在读取本机用量…';document.getElementById('tokens').replaceChildren();
+ limits.textContent='正在读取账户额度…';coverage.textContent='正在读取本机用量…';document.getElementById('tokens').replaceChildren();document.getElementById('recent').replaceChildren();document.getElementById('recent-coverage').textContent='正在读取近期调用…';
  await Promise.all([
   readUsage('usage').then(renderLimits).catch(e=>limits.textContent='额度未知：'+e.message),
-  readUsage('local-usage').then(renderTokens).catch(e=>coverage.textContent='用量未知：'+e.message),
+  readUsage('local-usage').then(renderTokens).catch(e=>{coverage.textContent='用量未知：'+e.message;document.getElementById('recent-coverage').textContent='近期调用未知：'+e.message;}),
  ]);button.disabled=false;
 }
 document.getElementById('usage').onclick=refreshUsage;
