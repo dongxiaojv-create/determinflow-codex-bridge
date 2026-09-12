@@ -2,7 +2,7 @@
 
 在 DeterminFlow 中使用**你自己登录的官方 Codex CLI 账户**。通过插件仓库安装，不需要 Codex 桌面应用，不提供共享账户或共享额度。
 
-**0.3.5 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
+**0.3.6 预览版：仅 macOS Apple Silicon。** 基于 DeterminFlow Desktop 1.1.0 / Core `9db9d98c` 的扩展接口，固定官方 Codex CLI `0.153.4`。其他 Core、CLI 版本、Intel Mac、Windows、Linux 尚未验收。此项目不是 OpenAI 或 DeterminFlow 官方插件。
 
 工作流推理强度优先级：任务显式覆盖 → agent 自身设置 → Main 默认 → `high`。0.3.1 修复了 Main 强度覆盖 agent 设置的问题；已创建任务的冻结配置不追溯修改。
 
@@ -33,6 +33,8 @@ Bridge 使用当前系统用户的 `CODEX_HOME`（默认 `~/.codex`）；凭据�
 
 本插件仅提供回环接口，并给模型接口配置每次启动随机生成的通行证。插件与 DeterminFlow 共享系统权限，不是同机恶意软件的安全隔离层。请求内容会发送到 OpenAI；本地插件数据还会保存模型结果、工具参数、用量和失败状态，分享故障资料前需脱敏。
 
+本地 HTTPS 的证书信任只交给桥接器专用客户端；不改写 DeterminFlow 进程的代理或 `SSL_CERT_FILE`，不修改系统代理、系统证书库或 Codex 用户配置。
+
 官方资料：[Codex 认证](https://developers.openai.com/codex/auth/) · [固定版本发布](https://github.com/openai/codex/releases/tag/rust-v0.153.4)
 
 ## 能力与限制
@@ -61,6 +63,8 @@ CODEX_TEST_RUNTIME=/absolute/path/to/native/codex python tests/check_runtime.py 
 ```
 
 Runtime 检查使用临时 HOME 和本地合成服务，不读取个人登录、不调用官方模型。发布验证范围见 [VALIDATION.md](VALIDATION.md)；第二台真实电脑安装和真实账户调用尚待验证。
+
+`tests/check_onboarding.py` 在设置 `CODEX_TEST_RUNTIME` 后还检查桌面生命周期脚本入口；可设置 `DETERMINFLOW_DESKTOP_PYTHON` 为实际桌面版内置后端，直接验证冻结运行环境。
 
 ## 许可
 

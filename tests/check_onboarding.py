@@ -1,10 +1,33 @@
 """Offline installer validation and official-login lifecycle checks; no real login."""
-import asyncio,io,json,os,sys,tarfile,tempfile,types
+import asyncio,io,json,os,subprocess,sys,tarfile,tempfile,tomllib,types
 from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'plugins/taixu-codex-bridge'))
 from determinflow_codex_bridge import setup_runtime as setup,onboarding
+
+
+def desktop_entrypoint(runtime):
+    with tempfile.TemporaryDirectory(prefix='desktop setup ') as temp:
+        root=Path(temp);data=root/'plugin data';config=root/'config.json'
+        config.write_text(json.dumps({'codex_path':runtime}))
+        plugin=ROOT/'plugins/taixu-codex-bridge'
+        # runpy, like the frozen host, does not add the plugin cwd to sys.path.
+        runner=root/'desktop.py'
+        runner.write_text("import runpy,sys\nsys.argv=sys.argv[1:]\nif sys.argv[0]=='-m':\n name=sys.argv[1];sys.argv=sys.argv[1:];runpy.run_module(name,run_name='__main__',alter_sys=True)\nelse:runpy.run_path(sys.argv[0],run_name='__main__')\n")
+        python=os.environ.get('DETERMINFLOW_DESKTOP_PYTHON') or sys.executable
+        command=tomllib.loads((plugin/'extension.toml').read_text())['lifecycle']['migrate_command']
+        values={'PYTHON':python,'PLUGIN_DIR':str(plugin),'DATA_DIR':str(data),'CONFIG_FILE':str(config)}
+        argv=[]
+        for value in command:
+            for key,replacement in values.items():value=value.replace('${'+key+'}',replacement)
+            argv.append(value)
+        if not os.environ.get('DETERMINFLOW_DESKTOP_PYTHON'):argv[1:1]=['-I',str(runner)]
+        env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'PYTHONDONTWRITEBYTECODE':'1','PYTHONUNBUFFERED':'1'}
+        subprocess.run(argv,cwd=plugin,env=env,check=True,capture_output=True,text=True,timeout=90)
+        assert len(json.loads((data/'catalog.json').read_text()))>1
+        assert not list(root.rglob('auth.json'))
+    print('PASS: manifest lifecycle runs without cwd imports, prepares catalog with blank login store')
 
 
 def archive(link=False):
@@ -97,3 +120,4 @@ if __name__=='__main__':
             assert len(json.loads((data/'catalog.json').read_text()))>1
             assert not list(data.rglob('auth.json'))
         print('PASS: pinned official Runtime catalog prepared with blank login store; no model generation')
+        desktop_entrypoint(os.environ['CODEX_TEST_RUNTIME'])

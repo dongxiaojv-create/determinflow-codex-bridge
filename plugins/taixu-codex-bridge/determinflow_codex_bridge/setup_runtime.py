@@ -2,8 +2,10 @@
 import fcntl,json,shutil,sys,tarfile,tempfile
 from pathlib import Path
 import httpx
-from . import bridge_native as native
-from .local_setup import find_runtime,proxy_environment
+# Frozen desktop Python does not add the script directory or cwd to sys.path.
+if not __package__:sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from determinflow_codex_bridge import bridge_native as native
+from determinflow_codex_bridge.local_setup import find_runtime,proxy_environment
 
 ARCHIVE='https://registry.npmjs.org/@openai/codex/-/codex-0.153.4-darwin-arm64.tgz'
 

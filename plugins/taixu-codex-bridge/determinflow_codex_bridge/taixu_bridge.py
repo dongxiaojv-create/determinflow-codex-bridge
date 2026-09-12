@@ -1,5 +1,5 @@
 """Small in-process Deter extension; only Runtime generation uses a child process."""
-import asyncio,contextlib,fcntl,hashlib,json,os,re,socket,time,tomllib,uuid
+import asyncio,contextlib,fcntl,hashlib,json,os,re,socket,ssl,time,tomllib,uuid
 from pathlib import Path
 import httpx
 from fastapi import APIRouter,FastAPI,HTTPException,Request
@@ -9,32 +9,33 @@ from . import bridge_native as native
 from .bridge_contract import validate_chat,chat_sse
 
 OWNER='taixu-codex-bridge'; PROVIDER='taixu_codex_limited'
-PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.5'
+PREFIX='/api/taixu-codex-bridge'; VERSION='0.3.6'
 
-def build_request(params,provider):
-    return {'client_kwargs':{},'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}
+def build_request(params,provider,**clients):
+    return {'client_kwargs':clients,'extra_body':{'reasoning_effort':params.get('reasoning_effort') or 'high'}}
 
 def model_adapter(model):return 'codex_bridge_'+hashlib.sha256(model.encode()).hexdigest()[:12]
 
-def register_adapter(catalog):
+def register_adapter(catalog,clients):
     # This pinned Core exposes its registry, but has no add_adapter extension hook.
     # Register only our own type; leave every built-in adapter and Core file untouched.
     from src.core.provider_adapters import PROVIDER_ADAPTERS
     from src.core.model_manager import PROVIDER_SCHEMAS
+    def request(params,provider):return build_request(params,provider,**clients)
     efforts=list(dict.fromkeys(e['reasoningEffort'] for row in catalog for e in row.get('supportedReasoningEfforts',[]) if e.get('reasoningEffort')))
     schema={
         'reasoning_effort':{'type':'select','label':'推理强度','default':'high','options':efforts or ['low','medium','high','xhigh']},
         'response_format':{'type':'json_mode','label':'JSON 输出模式','default':None},
         'stream_chunk_timeout':{'type':'number','label':'流式分块超时（秒）','default':None,'nullable':True,'min':1},
     }
-    PROVIDER_ADAPTERS['codex_bridge']={'api_format':'openai','model_params':schema,'build_request':build_request}
+    PROVIDER_ADAPTERS['codex_bridge']={'api_format':'openai','model_params':schema,'build_request':request}
     PROVIDER_SCHEMAS['codex_bridge']={'provider_type':'codex_bridge','display_name':'Codex Bridge','default_base_url':'','hyperparams':{}}
     for row in catalog:
         model=row.get('model') or row.get('id')
         options=[e['reasoningEffort'] for e in row.get('supportedReasoningEfforts',[]) if e.get('reasoningEffort')]
         if not isinstance(model,str) or not options:continue
         params=dict(schema,reasoning_effort=dict(schema['reasoning_effort'],options=options))
-        PROVIDER_ADAPTERS[model_adapter(model)]={'api_format':'openai','model_params':params,'build_request':build_request}
+        PROVIDER_ADAPTERS[model_adapter(model)]={'api_format':'openai','model_params':params,'build_request':request}
 
 class DefaultSelection:
     """Express the menu selection through the original task API, before Core freezes it."""
@@ -80,9 +81,11 @@ class Bridge:
         from .local_setup import prepare_tls
         self.config=prepare_tls(self.data)
         catalog=json.loads((self.data/'catalog.json').read_text()) if (self.data/'catalog.json').exists() else []
-        register_adapter(catalog)
-        # Preserve the existing local HTTPS transport before Core creates HTTP clients.
-        os.environ['SSL_CERT_FILE']=str(Path(self.config['tls_dir'])/'trust.pem')
+        context=ssl.create_default_context(cafile=str(Path(self.config['tls_dir'])/'trust.pem'))
+        # Only Bridge model clients trust this installation's CA and bypass ambient proxies.
+        self.clients={'http_client':httpx.Client(verify=context,trust_env=False),
+                      'http_async_client':httpx.AsyncClient(verify=context,trust_env=False)}
+        register_adapter(catalog,self.clients)
         router=APIRouter(prefix=PREFIX)
         router.add_api_route('/status',self.status,methods=['GET'])
         router.add_api_route('/control/{action}',self.control,methods=['POST'])
@@ -123,11 +126,10 @@ class Bridge:
         (self.data/'attempts').mkdir(exist_ok=True,mode=0o700)
         for name in ('work','tmp','log','sqlite','outputs'):(self.data/name).mkdir(exist_ok=True,mode=0o700)
         self.catalog=json.loads((self.data/'catalog.json').read_text()) if (self.data/'catalog.json').exists() else []
-        register_adapter(self.catalog)
+        register_adapter(self.catalog,self.clients)
         self.enabled=not (self.data/'stopped').exists(); self.key=uuid.uuid4().hex; self.generation=uuid.uuid4().hex
         import uvicorn
         tls=Path(self.config['tls_dir'])
-        if os.environ.get('SSL_CERT_FILE')!=str(tls/'trust.pem'):raise ValueError('Launch Core with the installation process-local SSL_CERT_FILE')
         model_app=FastAPI()
         model_app.add_api_route('/g/{generation}/v1/models',self.models,methods=['GET'])
         model_app.add_api_route('/g/{generation}/v1/chat/completions',self.chat,methods=['POST'])
@@ -309,10 +311,19 @@ class Bridge:
             self.login_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):await self.login_task
         await self.drain()
+        await self.stop_executor()
         if hasattr(self,'server'):
             self.server.should_exit=True
             await asyncio.wait_for(self.server_task,10)
         if hasattr(self,'lock'): self.lock.close()
+
+    def start_executor(self,runtime):
+        """Pair the Executor's register-time clients with its shutdown hook."""
+
+    async def stop_executor(self):
+        if hasattr(self,'clients'):
+            self.clients['http_client'].close()
+            await self.clients['http_async_client'].aclose()
 
     async def chat(self,generation:str,request:Request):
         self.authorize(request,generation)

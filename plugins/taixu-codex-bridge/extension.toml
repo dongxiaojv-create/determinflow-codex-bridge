@@ -1,7 +1,7 @@
 [extension]
 id = "taixu-codex-bridge"
 name = "Codex Bridge"
-version = "0.3.5"
+version = "0.3.6"
 api_version = "1"
 backend = "determinflow_codex_bridge.taixu_bridge:create_extension"
 capabilities = ["model.providers", "api.routes"]
@@ -16,5 +16,5 @@ static_dir = "ui"
 entrypoint = "index.html"
 
 [lifecycle]
-migrate_command = ["${PYTHON}", "-m", "determinflow_codex_bridge.setup_runtime", "${DATA_DIR}", "${CONFIG_FILE}"]
+migrate_command = ["${PYTHON}", "${PLUGIN_DIR}/determinflow_codex_bridge/setup_runtime.py", "${DATA_DIR}", "${CONFIG_FILE}"]
 timeout_seconds = 300

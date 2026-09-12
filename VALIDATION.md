@@ -1,8 +1,13 @@
-# 0.3.5 发布验证
+# 0.3.6 发布验证
 
 日期：2026-09-12。此版本为 macOS Apple Silicon 预览版。
 
 ## 已验证
+
+- 0.3.6：真实桌面版冻结后端复现旧 `-m` 入口的 `ModuleNotFoundError`；改为绝对脚本入口后，空目录完成官方 Runtime 下载、双 SHA256 校验和 11 项模型目录准备（本机约 13 秒），未读取用户登录或发送生成请求。
+- `tests/check_onboarding.py`：从 manifest 读取真实命令，通过不含插件 cwd 的隔离 Python 路径检查；`DETERMINFLOW_DESKTOP_PYTHON` 可直接指定冻结后端，本次亦通过该路径。
+- `tests/check_host.py`：真实 Core 与独立 Executor 进程通过同步/异步客户端访问本地 HTTPS 模型目录；预置无效代理和证书环境时仍正常，插件 register/start/stop 前后环境字典不变，错误 CA 与无通行证请求被拒绝，停止后连接池关闭。
+- TLS 信任与代理绕过均限于桥接器专用 HTTPX 客户端；不再设置 Deter 进程 `SSL_CERT_FILE`，不改系统网络或 Codex 用户配置。
 
 - 0.3.5：无预装 CLI 的临时目录完成官方固定组件真实下载、双 SHA256 校验、执行与未登录模型目录初始化；没有读取作者账户或调用模型。
 - `tests/check_onboarding.py`：原子安装、重复安装复用、压缩包符号链接拒绝、校验失败不安装、官方 URL 限制、已有登录跳过、模拟登录成功/失败/取消及进程回收。设置 `CODEX_TEST_RUNTIME` 后再检查真实 Runtime 的未登录目录准备。

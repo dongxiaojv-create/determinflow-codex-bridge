@@ -87,5 +87,5 @@ def certificates(folder):
     (folder/'server.crt').write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
     (folder/'server.key').write_bytes(leaf_key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()))
     (folder/'trust.pem').write_bytes(Path(certifi.where()).read_bytes()+b'\n'+ca.public_bytes(serialization.Encoding.PEM))
-    # CA signing key is never persisted. Only this installation's leaf key and process-local trust remain.
+    # CA signing key is never persisted. Only this installation's leaf key and Bridge-client-only trust remain.
     for path in folder.iterdir():path.chmod(0o600)

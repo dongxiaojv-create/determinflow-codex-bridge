@@ -74,10 +74,9 @@ def main():
             bridge_module=importlib.import_module('determinflow_codex_bridge.taixu_bridge')
             bridge=bridge_module.Bridge();routers=[]
             registrar=types.SimpleNamespace(manifest=bridge.manifest,add_router=routers.append,add_middleware=lambda *a,**kw:None)
-            original_proxy=os.environ.get('HTTPS_PROXY')
+            original_environment=dict(os.environ)
             bridge.register(registrar)
-            assert os.environ.get('HTTPS_PROXY')==original_proxy
-            assert Path(os.environ['SSL_CERT_FILE']).is_file()
+            assert dict(os.environ)==original_environment
             from fastapi import FastAPI
             from fastapi.testclient import TestClient
             app=FastAPI();app.include_router(routers[0])
@@ -101,6 +100,8 @@ def main():
             try:bridge.authorize(request)
             except HTTPException as error:assert error.status_code==403
             else:raise AssertionError('Remote request admitted')
+            asyncio.run(bridge.stop_executor())
+            assert all(client.is_closed for client in bridge.clients.values())
     print('PASS: package, TLS, npm CLI discovery, missing runtime, request validation and local API boundaries')
 
 
